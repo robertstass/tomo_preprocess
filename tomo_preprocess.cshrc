@@ -1,4 +1,4 @@
-set SCRIPT = `/usr/sbin/lsof +p $$ | grep -oE /.\*my_test_project.cshrc`
+set SCRIPT = `/usr/sbin/lsof +p $$ | grep -oE /.\*tomo_preprocess.cshrc`
 set SCRIPTPATH = `dirname $SCRIPT`
 setenv TOMO_PREPROCESS $SCRIPTPATH
 
