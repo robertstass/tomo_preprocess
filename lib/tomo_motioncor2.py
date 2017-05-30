@@ -16,7 +16,8 @@ class ArgumentParser():
                                                           "There are also options to apply dose weighting. "
                                                           "A typical example of how to use this script; "
                                                         "tomo_motioncor2 --input_folders \"??\" -i \"?????_??.??.??.mrc\" --tilt_scheme  continuous_positive --min_angle -30 --angle_step 3 -apix 1.35 --dose_per_movie 4.0 --do_custom_doseweighting ."
-                                                        "(another useful argument initially is --only_make_batch_file that will create a batch file that can be checked before actually running) ")
+                                                        "(another useful argument initially is --only_make_batch_file that will create a batch file that can be checked before actually running) "
+                                                        "(More detailed info in the README.txt)")
         general_args = self.parser.add_argument_group('General arguments')
         tilt_args = self.parser.add_argument_group('Tilt info arguments')
         motioncor_args = self.parser.add_argument_group('Motioncor2 arguments (optional)')
@@ -37,11 +38,11 @@ class ArgumentParser():
             help='An arbitrary name for the output stack, (if using --input_folders the name of the folder is given instead)')
 
         add_t('--tilt_scheme',
-             help='A tilt scheme used from the following list; continuous_positive, continuous_negative, bidirectional_positive, bidirectional_negative')
+             help='A tilt scheme used from the following list; %s. (more detailed info in the README.txt)' % (', '.join(accepted_tilt_schemes)))
         add_t('--min_angle', type=float,
               help='The minimum (most negative) angle used in the tilt series')
         add_t('--angle_step', type=float, help='The angular step between tilt images')
-
+        add_t('--starting_angle', type=float, default=default_starting_tilt_angle, help='(optional) The starting tilt angle. Only used for bidirectional and dose symmetric tilt schemes.')
 
         add_m('--motioncor2', default=default_motioncor2_exe, help='Location of the motioncor2 executable')
         add_m('--throw', default=0, type=int, help='Discard this number of frames from the start of each movie')
@@ -109,7 +110,7 @@ class ArgumentParser():
                     dose_info_required = False
 
 
-        tilt_info_args = ('tilt_scheme', 'min_angle', 'angle_step')
+        tilt_info_args = ('tilt_scheme', 'min_angle', 'angle_step', 'starting_angle')
 
         if tilt_info_required:
             if args.custom_tilt_order != None:
@@ -121,8 +122,8 @@ class ArgumentParser():
                         ', '.join(tilt_info_args)))
                 if args.tilt_scheme not in accepted_tilt_schemes:
                     self.error('Tilt scheme (%s) not supported.\nAccepted tilt schemes are %s' % (args.tilt_scheme, ', '.join(accepted_tilt_schemes)))
-
-
+                if args.tilt_scheme not in starting_angle_tilt_schemes and args.starting_angle != default_starting_tilt_angle:
+                    self.error('Starting angle not required with %s tilt scheme' % (args.tilt_scheme))
 
         do_any_doseweighting = args.do_motioncor2_doseweighting or args.do_custom_doseweighting
 
@@ -168,7 +169,7 @@ motioncor_file_suffix = 'motioncor_tilt_'
 dose_weight_suffix = '_DW'  # set by motioncor
 motioncor_file_name = 'tomo_motioncor2'
 all_frames_suffix = '_all_frames'
-starting_tilt_angle = 0  # only needed for the bidirectional tilt schemes
+default_starting_tilt_angle = 0  # only needed for the bidirectional tilt schemes
 batch_file_name = 'batch_tomo_motioncor2.sh'
 #motioncor options
 default_patch = 4
@@ -184,8 +185,10 @@ overwrite_existing_tilt_order_files = False
 #####
 
 
+
 accepted_tilt_schemes = ['continuous_positive', 'continuous_negative', 'bidirectional_positive',
-                         'bidirectional_negative']
+                         'bidirectional_negative', 'dose_symmetric_positive', 'dose_symmetric_negative']
+starting_angle_tilt_schemes = ['bidirectional_positive', 'bidirectional_negative', 'dose_symmetric_positive', 'dose_symmetric_negative']
 
 
 def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index):
@@ -203,6 +206,40 @@ def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index):
         if tilt_num <= centre:
             tilt_order = centre - tilt_num + 1
         else:
+            tilt_order = tilt_num
+
+    elif tilt_scheme == 'dose_symmetric_positive':
+        distance_from_minus_end = centre
+        distance_from_plus_end = total_tilts - centre + 1
+        distance_from_edge = min(distance_from_minus_end, distance_from_plus_end)
+        subseries_size = (2*distance_from_edge)-1
+        subseries_offset = centre-distance_from_edge
+        sub_tilt_num = tilt_num - subseries_offset
+        sub_centre = centre - subseries_offset
+        if sub_tilt_num <= sub_centre:
+            tilt_order = (subseries_size + 1 - (sub_tilt_num*2-1))
+        else:
+            tilt_order = (sub_tilt_num - sub_centre)*2
+        if tilt_num <= subseries_offset:
+            tilt_order = total_tilts - tilt_num + 1
+        if tilt_num >= centre+distance_from_edge:
+            tilt_order = tilt_num
+
+    elif tilt_scheme == 'dose_symmetric_negative':
+        distance_from_minus_end = centre
+        distance_from_plus_end = total_tilts - centre + 1
+        distance_from_edge = min(distance_from_minus_end, distance_from_plus_end)
+        subseries_size = (2 * distance_from_edge) - 1
+        subseries_offset = centre - distance_from_edge
+        sub_tilt_num = tilt_num - subseries_offset
+        sub_centre = centre - subseries_offset
+        if sub_tilt_num < sub_centre:
+            tilt_order = (subseries_size + 1 - (sub_tilt_num*2))
+        else:
+            tilt_order = (sub_tilt_num - sub_centre )*2 + 1
+        if tilt_num <= subseries_offset:
+            tilt_order = total_tilts - tilt_num + 1
+        if tilt_num >= centre+distance_from_edge:
             tilt_order = tilt_num
     else:
         print('Tilt scheme not supported')
@@ -228,8 +265,9 @@ def tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts,
     tilt_list = [min_angle + (angle_step * i) for i in range(0, total_tilts)]
     zero_tilt_index = tilt_list.index(min(tilt_list, key=lambda x: abs(x - starting_tilt_angle)))
     order_list = [tilt_order(tilt_scheme, i + 1, total_tilts, zero_tilt_index) for i in range(0, total_tilts)]
-    print('Tiltseries from %d to %d degrees in steps of %d degrees (%d tilts in total) using a %s tilt scheme.' % (
-        min_angle, max_angle, angle_step, total_tilts, tilt_scheme))
+    starting_angle_string = ' starting from %d degrees' % starting_tilt_angle if tilt_scheme in starting_angle_tilt_schemes else ''
+    print('Tiltseries from %d to %d degrees in steps of %d degrees%s (%d tilts in total) using a %s tilt scheme.' % (
+        min_angle, max_angle, angle_step, starting_angle_string, total_tilts, tilt_scheme))
     return order_list
 
 
@@ -314,7 +352,7 @@ def write_tilt_order(order_list, doses_list, folder):
 
 def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt_scheme, dose_per_movie, min_angle, angle_step,
          pixel_size, binning, throw, trunc, gpu, only_do_unfinished, do_motioncor2_doseweighting,
-         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations):
+         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations, starting_tilt_angle):
     #Read files
     file_list = sorted(glob.glob(folder + '/' + input_files))
     total_tilts = len(file_list)
@@ -392,8 +430,8 @@ def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt
         if (use_tilt_order_files and os.path.isfile(tilt_order_path)) or custom_tilt_order != None:
             custom_doseweight_line = '%s --custom_dose_series "%s"' % (custom_doseweight_line, display_number_list(doses_list))
         else:
-            custom_doseweight_line = '%s --tilt_scheme %s --dose_per_tilt %f --min_angle %f --angle_step %f --pre_dose %f' % (
-                custom_doseweight_line, tilt_scheme, dose_per_movie, min_angle, angle_step, pre_dose)
+            custom_doseweight_line = '%s --tilt_scheme %s --dose_per_tilt %f --min_angle %f --angle_step %f --starting_angle %f --pre_dose %f' % (
+                custom_doseweight_line, tilt_scheme, dose_per_movie, min_angle, angle_step, starting_tilt_angle, pre_dose)
         f.write('echo "' + custom_doseweight_line + '"\n')
         f.write(custom_doseweight_line + '\n')
     f.close()
@@ -404,7 +442,8 @@ def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt
 
 def main(motioncor2, frames, input_files, input_folders, tomo_name, tilt_scheme, dose_per_movie, min_angle, angle_step,
          pixel_size, binning, throw, trunc, gpu, only_make_batch_file, only_do_unfinished, do_motioncor2_doseweighting,
-         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations):
+         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations,
+         starting_tilt_angle):
     if input_folders != None:
         folder_list = sorted(glob.glob(input_folders))
         batch_f = open(batch_file_name, 'w')
@@ -419,7 +458,7 @@ def main(motioncor2, frames, input_files, input_folders, tomo_name, tilt_scheme,
         #Main script for individual tilt series
         motioncor_file = tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt_scheme, dose_per_movie, min_angle, angle_step,
          pixel_size, binning, throw, trunc, gpu, only_do_unfinished, do_motioncor2_doseweighting,
-         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations)
+         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations, starting_tilt_angle)
 
         if input_folders != None:
             batch_f.write(motioncor_file + '\n')
@@ -449,7 +488,7 @@ if __name__ == "__main__":
          args.dose_per_movie, args.min_angle, args.angle_step, args.pixel_size, args.binning, args.throw, args.trunc,
          args.gpu, args.only_make_batch_file, args.only_do_unfinished, args.do_motioncor2_doseweighting,
          args.do_custom_doseweighting, args.pre_dose, args.use_tilt_order_files, args.custom_tilt_order,
-         args.write_tilt_order_files, args.patch, args.iterations)
+         args.write_tilt_order_files, args.patch, args.iterations, args.starting_angle)
 
 
 

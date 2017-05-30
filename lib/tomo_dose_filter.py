@@ -20,10 +20,12 @@ class ArgumentParser():
         addr('-i', '--tilt_series', required=True,
              help='A wild card expression (IN QUOTES!) to the tilt series stacks. (Images should be ordered correctly in the stack -ve to +ve)')
         addr('--tilt_scheme',
-             help='A tilt scheme used from the following list; continuous_positive, continuous_negative, bidirectional_positive, bidirectional_negative')
+             help='A tilt scheme used from the following list; %s. (more detailed info in the README.txt)' % (', '.join(accepted_tilt_schemes)))
         addr('-dose', '--dose_per_tilt', type=float, help='Dose applied per tilt image. (in e-/A^2)')
         addr('--min_angle', type=float, help='The minimum (most negative) angle used in the tilt series')
         addr('--angle_step', type=float, help='The angular step between tilt images')
+        add('--starting_angle', type=float, default=default_starting_tilt_angle,
+              help='(optional) The starting tilt angle. Only used for bidirectional and dose symmetric tilt schemes.')
         addr('-apix', '--pixel_size', required=True, type=float, help='The pixel size of the images in angstrom')
         add('--pre_dose', default=0, type=float, help='Initial dose before tilt series collected.')
         add('--file_append', default='dw', type=str, help='String to append to the end of the file.')
@@ -63,20 +65,23 @@ class ArgumentParser():
             print(error_msgs)
             if error_msgs != []:
                 self.error(*error_msgs)
+            if args.tilt_scheme not in starting_angle_tilt_schemes and args.starting_angle != default_starting_tilt_angle:
+                self.error('Starting angle not required with %s tilt scheme' % (args.tilt_scheme))
 
 
 # Nitpicky details
 starting_tilt_angle = 0  # only needed for the bidirectional tilt schemes
 plot_filters = []  # [0,10,29] #[0,1,2]
 keep_header_apix = True #use the original pixel size in the header of the output file. (apix is still used for the dose weighting). This avoids mismatches in pixel size between the input and output stacks.
-
+default_starting_tilt_angle = 0
 ####
 if plot_filters != []:  # only use if matplotlib available
     import matplotlib.pyplot as plt
     from mpl_toolkits.mplot3d import Axes3D
 
 accepted_tilt_schemes = ['continuous_positive', 'continuous_negative', 'bidirectional_positive',
-                         'bidirectional_negative']
+                         'bidirectional_negative', 'dose_symmetric_positive', 'dose_symmetric_negative']
+starting_angle_tilt_schemes = ['bidirectional_positive', 'bidirectional_negative', 'dose_symmetric_positive', 'dose_symmetric_negative']
 
 
 def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index):
@@ -95,10 +100,54 @@ def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index):
             tilt_order = centre - tilt_num + 1
         else:
             tilt_order = tilt_num
+
+    elif tilt_scheme == 'dose_symmetric_positive':
+        distance_from_minus_end = centre
+        distance_from_plus_end = total_tilts - centre + 1
+        distance_from_edge = min(distance_from_minus_end, distance_from_plus_end)
+        subseries_size = (2*distance_from_edge)-1
+        subseries_offset = centre-distance_from_edge
+        sub_tilt_num = tilt_num - subseries_offset
+        sub_centre = centre - subseries_offset
+        if sub_tilt_num <= sub_centre:
+            tilt_order = (subseries_size + 1 - (sub_tilt_num*2-1))
+        else:
+            tilt_order = (sub_tilt_num - sub_centre)*2
+        if tilt_num <= subseries_offset:
+            tilt_order = total_tilts - tilt_num + 1
+        if tilt_num >= centre+distance_from_edge:
+            tilt_order = tilt_num
+
+    elif tilt_scheme == 'dose_symmetric_negative':
+        distance_from_minus_end = centre
+        distance_from_plus_end = total_tilts - centre + 1
+        distance_from_edge = min(distance_from_minus_end, distance_from_plus_end)
+        subseries_size = (2 * distance_from_edge) - 1
+        subseries_offset = centre - distance_from_edge
+        sub_tilt_num = tilt_num - subseries_offset
+        sub_centre = centre - subseries_offset
+        if sub_tilt_num < sub_centre:
+            tilt_order = (subseries_size + 1 - (sub_tilt_num*2))
+        else:
+            tilt_order = (sub_tilt_num - sub_centre )*2 + 1
+        if tilt_num <= subseries_offset:
+            tilt_order = total_tilts - tilt_num + 1
+        if tilt_num >= centre+distance_from_edge:
+            tilt_order = tilt_num
     else:
         print('Tilt scheme not supported')
         raise ValueError
     return tilt_order
+
+def tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts, starting_tilt_angle):
+    max_angle = min_angle + (angle_step * (total_tilts - 1))
+    tilt_list = [min_angle + (angle_step * i) for i in range(0, total_tilts)]
+    zero_tilt_index = tilt_list.index(min(tilt_list, key=lambda x: abs(x - starting_tilt_angle)))
+    order_list = [tilt_order(tilt_scheme, i + 1, total_tilts, zero_tilt_index) for i in range(0, total_tilts)]
+    starting_angle_string = ' starting from %d degrees' % starting_tilt_angle if tilt_scheme in starting_angle_tilt_schemes else ''
+    print('Tiltseries from %d to %d degrees in steps of %d degrees%s (%d tilts in total) using a %s tilt scheme.' % (
+        min_angle, max_angle, angle_step, starting_angle_string, total_tilts, tilt_scheme))
+    return order_list
 
 
 class DoseWeight:
@@ -226,17 +275,12 @@ class DoseWeight:
 
 
 def tilt_series_dose_weight(tilt_series, dose_per_tilt, file_append, apix, plot_filters, tilt_scheme, min_angle,
-                            angle_step, do_not_do_dose_weighting, custom_dose_series, pre_dose):
+                            angle_step, do_not_do_dose_weighting, custom_dose_series, pre_dose, starting_tilt_angle):
     dw = DoseWeight(tilt_series, [], apix, file_append, plot_filters)
     if custom_dose_series == None:
         total_tilts = dw.number_of_files
-        max_angle = min_angle + (angle_step * (total_tilts - 1))
-        tilt_list = [min_angle + (angle_step * i) for i in range(0, total_tilts)]
-        zero_tilt_index = tilt_list.index(min(tilt_list, key=lambda x: abs(x - starting_tilt_angle)))
-        order_list = [tilt_order(tilt_scheme, i + 1, total_tilts, zero_tilt_index) for i in range(0, total_tilts)]
+        order_list = tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts, starting_tilt_angle)
         doses = [(order * dose_per_tilt) + pre_dose for order in order_list]
-        print('Tiltseries from %d to %d degrees in steps of %d degrees (%d tilts in total) using a %s tilt scheme.' % (
-        min_angle, max_angle, angle_step, total_tilts, tilt_scheme))
     else:
         doses = custom_dose_series.split(',')
         doses = [float(dose) for dose in doses]
@@ -253,11 +297,11 @@ def tilt_series_dose_weight(tilt_series, dose_per_tilt, file_append, apix, plot_
 
 
 def main(tilt_series, dose_per_tilt, file_append, apix, plot_filters, tilt_scheme, min_angle, angle_step,
-         do_not_do_dose_weighting, custom_dose_series, pre_dose):
+         do_not_do_dose_weighting, custom_dose_series, pre_dose, starting_tilt_angle):
     tilt_series = sorted(glob.glob(tilt_series))
     for stack in tilt_series:
         tilt_series_dose_weight(stack, dose_per_tilt, file_append, apix, plot_filters, tilt_scheme, min_angle,
-                                angle_step, do_not_do_dose_weighting, custom_dose_series, pre_dose)
+                                angle_step, do_not_do_dose_weighting, custom_dose_series, pre_dose, starting_tilt_angle)
 
 
 if __name__ == "__main__":
@@ -266,7 +310,7 @@ if __name__ == "__main__":
     argparser.validate(args)
 
     main(args.tilt_series, args.dose_per_tilt, args.file_append, args.pixel_size, plot_filters, args.tilt_scheme,
-         args.min_angle, args.angle_step, args.do_not_do_dose_weighting, args.custom_dose_series, args.pre_dose)
+         args.min_angle, args.angle_step, args.do_not_do_dose_weighting, args.custom_dose_series, args.pre_dose, args.starting_angle)
 
 
 
