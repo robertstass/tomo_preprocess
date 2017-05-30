@@ -164,7 +164,7 @@ class ArgumentParser():
 
 ## Nitpicky details
 default_motioncor2_exe = 'MotionCor2'
-motioncor_file_prefix = 'motioncor_tilt_'
+motioncor_file_suffix = 'motioncor_tilt_'
 dose_weight_suffix = '_DW'  # set by motioncor
 motioncor_file_name = 'tomo_motioncor2'
 all_frames_suffix = '_all_frames'
@@ -363,11 +363,9 @@ def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt
     dw_motioncor_image_paths = [None for i in range(0, total_tilts)]
     for i, movie in enumerate(file_list):
         order_string = str(order_list.index(i + 1) + 1).zfill(2)
-        motioncor_image_path = '/'.join(
-            movie.split('/')[0:-1]) + '/' + motioncor_file_prefix + order_string + '.mrc'
+        motioncor_image_path = os.path.splitext(movie)[0] + '_' + motioncor_file_suffix + order_string + '.mrc'
         motioncor_image_paths[order_list.index(i + 1)] = motioncor_image_path
-        dw_motioncor_image_paths[order_list.index(i + 1)] = '.'.join(
-            motioncor_image_path.split('.')[0:-1]) + dose_weight_suffix + '.mrc'
+        dw_motioncor_image_paths[order_list.index(i + 1)] = os.path.splitext(motioncor_image_path)[0] + dose_weight_suffix + '.mrc'
         motioncor_line = '%s -InMrc %s -OutMrc %s -FtBin %d -Patch %d %d -Gpu %d -Iter %d -Throw %d -Trunc %d' % (
             motioncor2, movie, motioncor_image_path, binning, patch, patch, gpu, iterations, throw, trunc)
         if do_motioncor2_doseweighting:
