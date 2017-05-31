@@ -68,6 +68,9 @@ class ArgumentParser():
             if args.tilt_scheme not in starting_angle_tilt_schemes and args.starting_angle != default_starting_tilt_angle:
                 self.error('Starting angle not required with %s tilt scheme' % (args.tilt_scheme))
 
+        if sys.version_info < (2, 7):
+            self.error("Python version 2.7 or later is required.")
+
 
 # Nitpicky details
 starting_tilt_angle = 0  # only needed for the bidirectional tilt schemes

@@ -149,7 +149,8 @@ class ArgumentParser():
             if not (spawn.find_executable(custom_doseweight_script)):
                 self.error("%s not found." % (custom_doseweight_script),
                            "Make sure dose_filter is in $PATH.")
-
+        if sys.version_info < (2, 7):
+            self.error("Python version 2.7 or later is required.")
 
 
 
