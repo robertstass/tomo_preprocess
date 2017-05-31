@@ -12,7 +12,7 @@ fi
 ## PYTHONPATH
 
 if [ -z ${PYTHONPATH+x} ]; then
-        export PYTHONPATH=$TOMO_PREPROCESS/lib
+        export PYTHONPATH=$TOMO_PREPROCESS/python_dependencies
 else
-    	export PYTHONPATH=$TOMO_PREPROCESS/lib:$PYTHONPATH
+    	export PYTHONPATH=$TOMO_PREPROCESS/python_dependencies:$PYTHONPATH
 fi
