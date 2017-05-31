@@ -7,7 +7,7 @@ Address: OPIC, Strubi, University of Oxford
 
 
 Dependencies:
-* MotionCor2
+* MotionCor2 (version motioncor2_10192016 or later for dose weighting)
 * Bsoft - Must be in $PATH
 - mrcfile python library by Colin Palmer at CCP-EM. A version of this (mrcfile 1.0.0) is included in the repository for convenience.
         Thanks to Colin and CCP-EM for this very useful tool! download: https://pypi.python.org/pypi/mrcfile
