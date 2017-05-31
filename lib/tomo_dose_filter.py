@@ -68,8 +68,10 @@ class ArgumentParser():
             if args.tilt_scheme not in starting_angle_tilt_schemes and args.starting_angle != default_starting_tilt_angle:
                 self.error('Starting angle not required with %s tilt scheme' % (args.tilt_scheme))
 
+        if sys.version_info < (2, 7):
+            self.error("Python version 2.7 or later is required.")
 
-# Nitpicky details
+            # Nitpicky details
 starting_tilt_angle = 0  # only needed for the bidirectional tilt schemes
 plot_filters = []  # [0,10,29] #[0,1,2]
 keep_header_apix = True #use the original pixel size in the header of the output file. (apix is still used for the dose weighting). This avoids mismatches in pixel size between the input and output stacks.
