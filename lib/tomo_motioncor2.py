@@ -177,6 +177,7 @@ default_patch = 4
 default_iterations = 3
 default_kv = 300
 kv = default_kv
+sort_by_name = False
 
 custom_doseweight_script = 'tomo_dose_filter'
 tilt_order_filename = 'tilt.order'
@@ -355,7 +356,11 @@ def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt
          pixel_size, binning, throw, trunc, gpu, only_do_unfinished, do_motioncor2_doseweighting,
          do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations, starting_tilt_angle):
     #Read files
-    file_list = sorted(glob.glob(folder + '/' + input_files))
+    file_list = glob.glob(folder + '/' + input_files)
+    if sort_by_name:
+        file_list = sorted(file_list)
+    else:
+        file_list.sort(key=os.path.getmtime)
     total_tilts = len(file_list)
 
     #Parse tilt information
