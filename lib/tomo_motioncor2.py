@@ -18,6 +18,8 @@ class ArgumentParser():
                                                           "A typical example of how to use this script; "
                                                         "tomo_motioncor2 --input_folders \"??\" -i \"?????_??.??.??.mrc\" --tilt_scheme  continuous_positive --min_angle -30 --angle_step 3 -apix 1.35 --dose_per_movie 4.0 --do_custom_doseweighting ."
                                                         "(another useful argument initially is --only_make_batch_file that will create a batch file that can be checked before actually running) "
+                                                        "Ctf estimation (with the included tomo_ctf_estimate script) "
+                                                        "can also be called from this script with --do_ctf_estimation "
                                                         "(More detailed info in the README.txt)")
         general_args = self.parser.add_argument_group('General arguments')
         tilt_args = self.parser.add_argument_group('Tilt info arguments')

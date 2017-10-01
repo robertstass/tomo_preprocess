@@ -11,16 +11,18 @@ Dependencies:
 * Bsoft - Must be in $PATH
 - mrcfile python library by Colin Palmer at CCP-EM. A version of this (mrcfile 1.0.0) is included in the repository for convenience.
         Thanks to Colin and CCP-EM for this very useful tool! download: https://pypi.python.org/pypi/mrcfile
+- pyrelion python library. A version is included in the repository for convenience. Also available here https://github.com/OPIC-Oxford/pyrelion-scripts.
 - numpy python library (for custom dose weighting)
 - python 2.7
 
 
 
 About:
-tomo_preprocess performs three common preprocessing functions for tomographic tilt series data before further processing (eg with etomo)
+tomo_preprocess performs four common preprocessing functions for tomographic tilt series data before further processing (eg with etomo)
     -Motion correction with motioncor2
     -Sorting the images into the correct order (especially needed for more complicated tilt schemes)
     -Applying dose weighting to the images according to the Grant & Grigorieff (2015) paper.
+    -Ctf estimation with relion_run_ctffind. This produces a star file that can later be converted to an imod .defocus file.
 
 For most data sets this can be done with a single command.
 
@@ -130,3 +132,25 @@ For unsupported tilt schemes or times where some files are missing there are som
         3   13.1
         4   14.1
         5   15.1
+
+
+Ctf estimation:
+    This is done by the tomo_ctf_estimate script.
+    This will do two things:
+        -Sort the motion corrected micrographs into a micrograph star file in tilt order (-ve to +ve) based on the tilt scheme used.
+        -Ctf estimation is done using 'relion_run_ctffind' which is wrapper that can use ctffind3, ctffind4 or gctf (relion 2 only)
+        (alternatively you can just produce the sorted micrograph star file and use that for ctf estimation with the relion gui)
+    This will output a star file with estimated ctf parameters in tilt order (and separated by tilt series)
+
+    example usage: tomo_ctf_estimate --input_folders "tomo_???" -i "tomo_*_*_?????_??.??.??.mrc" -apix 2.0 --tilt_scheme bidirectional_negative --min_angle -30 --angle_step 3 --rln_version 2 --ctf_software ctffind4 --ctf_exe /apps/strubi/ctf/4.1.5/ctffind --ResMin 50 --ResMax 7
+    The same options can be passed to the main tomo_preprocess script with the additional argument --do_ctf_estimation
+
+
+    Once your tilt series has been aligned you can write the data in the star file to imod .defocus files.
+     (This needs to be done after tilt series alignment because the tilt angles and (for astigmatism) angular rotation between .ali and .st are needed.
+    To do this use tomo_write_imod_defocus with these options:
+        -i <wildcard to imod .edf project files>
+        --ctf_star <the star file from tomo_ctf_estimate>
+        --version The version of imod defocus file you want to write. (version 3 files include astigmatism but only work with later versions of imod (4.9+))
+
+    (It's very important that the micrographs in the star file remain in tilt order and separated by tilt series)
