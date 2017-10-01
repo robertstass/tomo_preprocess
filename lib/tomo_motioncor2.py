@@ -6,6 +6,7 @@ import stat
 import sys
 import argparse
 from distutils import spawn
+from tomo_ctf_estimate import *
 
 
 class ArgumentParser():
@@ -22,19 +23,21 @@ class ArgumentParser():
         tilt_args = self.parser.add_argument_group('Tilt info arguments')
         motioncor_args = self.parser.add_argument_group('Motioncor2 arguments (optional)')
         dw_args = self.parser.add_argument_group('Dose weighting arguments (optional)')
+        ctf_args = self.parser.add_argument_group('Ctf estimation arguments (optional)')
         advanced_args = self.parser.add_argument_group('Advanced arguments (optional)')
 
         add_g = general_args.add_argument  # shortcut
         add_t = tilt_args.add_argument
         add_m = motioncor_args.add_argument
         add_d = dw_args.add_argument
+        add_c = ctf_args.add_argument
         add_a = advanced_args.add_argument
 
         add_g('--input_folders', default=None,
               help='A wild card expression (IN QUOTES!) to some folders for batch operations of this script on multiple tilt series')
-        add_g('-i', '--input_files', default='?????_??.??.??.mrc',
+        add_g('-i', '--input_files', default='~',
             help='A wild card expression (IN QUOTES!) to the movie stacks. Note that these should sort alphabetically in the order that they were taken.')
-        add_g('--tomo_name', default='tomo',
+        add_g('--tomo_name', default=default_tomo_name,
             help='An arbitrary name for the output stack, (if using --input_folders the name of the folder is given instead)')
 
         add_t('--tilt_scheme',
@@ -48,10 +51,10 @@ class ArgumentParser():
         add_m('--throw', default=0, type=int, help='Discard this number of frames from the start of each movie')
         add_m('--trunc', default=0, type=int, help='Discard this number of frames from the end of each movie')
         add_m('--binning', default=1, type=int, help='Bin the images')
-        add_m('--gpu', default=0, type=int, help='The id of the gpu to use')
+        add_m('--gpu', default=default_gpu, type=int, help='The id of the gpu to use. motioncor2 and for ctf estimation if using gctf')
         add_m('--patch', default=default_patch, type=int, help="motioncor2 Patch option. x will be given as 'x x'")
         add_m('--iterations', default=default_iterations, type=int, help='motioncor2 Iter option.')
-
+        add_m('--crop', default='0,0', help='motioncor2 crop option. Enter x and y separated by a comma e.g. 3000,3000')
 
         add_d('-dose', '--dose_per_movie', type=float, default=None,
               help='Dose applied per movie. (this is divided by the number of frames to input into motioncor2')
@@ -63,12 +66,48 @@ class ArgumentParser():
         add_d('--do_custom_doseweighting', action='store_true',
               help="Use this option to use the tomo_dose_filter.py script for dose weighting each tilt series")
 
+
+
+        add_c('--do_ctf_estimation', action='store_true', help='Set this option to estimate ctf parameters.')
+        add_c('--rln_version', type=int, default=2, help='Relion version 1 or 2 (1 < 1.6 and 2 = 2+)')
+        add_c('--ctf_software', type=str, default=ctf_software_options[0],
+              help='Which ctf estimation software to use. You must input one of the following options %s. NB gctf only works with relion 2+.' % ', '.join(
+                  ctf_software_options))
+        add_c('--ctf_star', default=default_ctf_star,
+              help='Output star file for the ctf estimation parameters. (NB The extension is ignored to create a directory for relion 2+).')
+        add_c('--CS', type=int, default=default_CS, help="Relion's CS parameter: Spherical aberration (mm)")
+        add_c('--HT', type=int, default=default_HT, help="Relion's HT parameter: Voltage (kV)")
+        add_c('--AmpCnst', type=float, default=default_AmpCnst,
+              help="Relion's AmpCnst parameter: Fraction of amplitude contrast.")
+        add_c('--Box', type=int, default=default_Box, help="Relion's Box parameter: Box size for ctf estimation")
+        add_c('--ResMin', type=int, default=default_ResMin,
+              help="Relion's ResMin parameter: Minimum resolution for ctf estimation (A)")
+        add_c('--ResMax', type=int, default=default_ResMax,
+              help="Relion's  parameter: Maximum resolution for ctf estimation (A)")
+        add_c('--dFMin', type=int, default=default_dFMin,
+              help="Relion's dFMin parameter: Minimum defocus value for ctf estimation (A)")
+        add_c('--dFMax', type=int, default=default_dFMax,
+              help="Relion's dFMax parameter: Maximum defocus value for ctf estimation (A)")
+        add_c('--FStep', type=int, default=default_FStep, help="Relion's FStep parameter: Defocus search step size")
+        add_c('--dAst', type=int, default=default_dAst, help="Relion's dAst parameter: Amount of astigmatism (A)")
+        add_c('--ctfWin', type=int, default=default_ctfWin,
+              help="Relion's ctfWin parameter: a squared window of this size at the center of the micrograph will be used to estimate the CTF. set -1 to use whole micrograph")
+        add_c('--cores', type=int, default=default_cores, help="Number of cpu cores to use (ctffind only. use --gpu for gctf)")
+        add_c('--ctf_exe', type=str, default=default_ctf_exe, help="Path to the ctffind/gctf executable.")
+
+
+
+
         add_a('--only_do_unfinished', action='store_true',
-            help='Only run motion correction on those that do not have a motion corrected image already. (by deleting bad examples, you can easily rerun the script with different settings for the deleted images only)')
+            help="Only run motion correction on those that do not have a motion corrected image already. (by deleting bad examples, you can easily rerun the script with different settings for the deleted images only). This is also passed on to relion's ctf estimation to do the same thing there.")
         add_a('--custom_tilt_order', default=None, help="A comma delimited list of integers denoting the order that tilts were taken. This can be used with the tilt info options.")
         add_a('--use_tilt_order_files', action='store_true',
               help="Supply tilt information as a 'tilt.order' file in the same directory as the input files. Format: One line per tilt with integers denoting the order they were taken. A second column can optionally be included with dose values (after movie recorded). If the file does not exist the values specified in the 'Tilt info arguments' or by '--custom_tilt_order' will be used.")
         add_a('--write_tilt_order_files', action='store_true', help='Write out tilt.order files based on the given tilt arguments. Existing files will not be overwritten.')
+        add_a('--only_make_sorted_ctf_mic_star', action='store_true',
+              help='Only create the micrograph star file so that ctf estimation can be done with the relion gui.')
+        add_a('--only_print_ctf_command', action='store_true',
+              help="Only print the ctffind/gctf command to the terminal (don't execute it)")
         add_a('--only_make_batch_file', action='store_true', help='Only create the list of commands to execute but do not execute them. These can be modified and run separately.')
 
 
@@ -94,38 +133,14 @@ class ArgumentParser():
             self.error('Error: No folders found.' % (args.input_folders))
             sys.exit(2)
 
-        #Check tilt order information
-        tilt_info_required = True
-        dose_info_required = True
-        if args.use_tilt_order_files:
-            folder_list = sorted(glob.glob(args.input_folders)) if args.input_folders != None else (['.'] if '/'.join(args.input_files.split('/')[0:-1]) == '' else ['/'.join(args.input_files.split('/')[0:-1])])
-            order_files = [folder + '/' + tilt_order_filename for folder in folder_list]
-            if any([not os.path.isfile(order_file) for order_file in order_files]):
-                tilt_info_required = True
-                dose_info_required = True
-            else:
-                tilt_info_required = False
-                tilt_order_info_list = [read_tilt_order(order_file) for order_file in order_files]
-                if not any([doses_list == None for order_list, doses_list in tilt_order_info_list]):
-                    dose_info_required = False
+        args.crop = csv_string_to_int_tuple(args.crop, desired_length=2)
+        if args.crop == False:
+            self.error('--crop must be a comma separated list of 2 integers')
 
-
-        tilt_info_args = ('tilt_scheme', 'min_angle', 'angle_step', 'starting_angle')
-
-        if tilt_info_required:
-            if args.custom_tilt_order != None:
-                if any([getattr(args, arg) != None for arg in tilt_info_args]):
-                    self.error('Tilt info arguments cannot be used with the --custom_tilt_order option. (ie %s)' % (', '.join(tilt_info_args)))
-            else:
-                if any([getattr(args, arg) == None for arg in tilt_info_args]):
-                    self.error('Tilt info arguments are required. (ie. %s)' % (
-                        ', '.join(tilt_info_args)))
-                if args.tilt_scheme not in accepted_tilt_schemes:
-                    self.error('Tilt scheme (%s) not supported.\nAccepted tilt schemes are %s' % (args.tilt_scheme, ', '.join(accepted_tilt_schemes)))
-                if args.tilt_scheme not in starting_angle_tilt_schemes and args.starting_angle != default_starting_tilt_angle:
-                    self.error('Starting angle not required with %s tilt scheme' % (args.tilt_scheme))
+        dose_info_required = tilt_info_validation(self, args)
 
         do_any_doseweighting = args.do_motioncor2_doseweighting or args.do_custom_doseweighting
+
 
 
         if do_any_doseweighting:
@@ -136,6 +151,11 @@ class ArgumentParser():
                     self.error('Missing argument: -dose or --dose_per_movie')
             if args.do_motioncor2_doseweighting and (args.frames == None or args.dose_per_movie == None):
                 self.error('Missing argument: --frames and --dose_per_movie/-dose is required when doing motioncor2 dose weighting')
+
+        if args.do_ctf_estimation:
+            args.only_make_sorted_mic_star = args.only_make_sorted_ctf_mic_star
+            args.only_print_command = args.only_print_ctf_command
+            ctf_estimation_argument_validation(self, args)
 
 
         #Find the software dependencies
@@ -157,6 +177,41 @@ class ArgumentParser():
 
 
 
+def tilt_info_validation(self, args):
+    # Check tilt order information
+    tilt_info_required = True
+    dose_info_required = True
+    if args.use_tilt_order_files:
+        folder_list = sorted(glob.glob(args.input_folders)) if args.input_folders != None else (
+        ['.'] if '/'.join(args.input_files.split('/')[0:-1]) == '' else ['/'.join(args.input_files.split('/')[0:-1])])
+        order_files = [folder + '/' + tilt_order_filename for folder in folder_list]
+        if any([not os.path.isfile(order_file) for order_file in order_files]):
+            tilt_info_required = True
+            dose_info_required = True
+        else:
+            tilt_info_required = False
+            tilt_order_info_list = [read_tilt_order(order_file) for order_file in order_files]
+            if not any([doses_list == None for order_list, doses_list in tilt_order_info_list]):
+                dose_info_required = False
+
+    tilt_info_args = ('tilt_scheme', 'min_angle', 'angle_step', 'starting_angle')
+
+    if tilt_info_required:
+        if args.custom_tilt_order != None:
+            if any([getattr(args, arg) != None for arg in tilt_info_args]):
+                self.error('Tilt info arguments cannot be used with the --custom_tilt_order option. (ie %s)' % (
+                ', '.join(tilt_info_args)))
+        else:
+            if any([getattr(args, arg) == None for arg in tilt_info_args]):
+                self.error('Tilt info arguments are required. (ie. %s)' % (
+                    ', '.join(tilt_info_args)))
+            if args.tilt_scheme not in accepted_tilt_schemes:
+                self.error('Tilt scheme (%s) not supported.\nAccepted tilt schemes are %s' % (
+                args.tilt_scheme, ', '.join(accepted_tilt_schemes)))
+            if args.tilt_scheme not in starting_angle_tilt_schemes and args.starting_angle != default_starting_tilt_angle:
+                self.error('Starting angle not required with %s tilt scheme' % (args.tilt_scheme))
+
+    return dose_info_required
 
 
 
@@ -178,12 +233,16 @@ default_iterations = 3
 default_kv = 300
 kv = default_kv
 sort_by_name = False
+default_tomo_name='tomo'
 
 custom_doseweight_script = 'tomo_dose_filter'
 tilt_order_filename = 'tilt.order'
 overwrite_existing_tilt_order_files = False
+#ctf options
+pass_only_do_unfinished_to_ctf_estimation = True
+ctf_estimation_script = 'tomo_ctf_estimate'
 
-
+#default ctf paramerers in the tomo_ctf_estimate script
 #####
 
 
@@ -247,6 +306,17 @@ def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index):
         print('Tilt scheme not supported')
         raise ValueError
     return tilt_order
+
+
+
+def csv_string_to_int_tuple(string, desired_length=None):
+    split_string = string.split(',')
+    ints = [int(x) for x in split_string if x.isdigit()]
+    desired_length = len(ints) if desired_length == None else desired_length
+    if not all(isinstance(item, int) for item in ints) or len(ints) != desired_length:
+        return False
+    else:
+        return ints
 
 
 def is_unfinished(filename, dose_weight_append, do_motioncor2_doseweighting):
@@ -352,20 +422,9 @@ def write_tilt_order(order_list, doses_list, folder):
     f.close()
 
 
-def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt_scheme, dose_per_movie, min_angle, angle_step,
-         pixel_size, binning, throw, trunc, gpu, only_do_unfinished, do_motioncor2_doseweighting,
-         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations, starting_tilt_angle):
-    #Read files
-    file_list = glob.glob(folder + '/' + input_files)
-    if sort_by_name:
-        file_list = sorted(file_list)
-    else:
-        file_list.sort(key=os.path.getmtime)
-    total_tilts = len(file_list)
-
-    #Parse tilt information
-    print('\n')
-    print('Tilt Series; %s' % tomo_name)
+def parse_tilt_order_and_dose(folder, do_motioncor2_doseweighting, do_custom_doseweighting, use_tilt_order_files,
+    custom_tilt_order, total_tilts, tilt_scheme, min_angle, angle_step, starting_tilt_angle, tomo_name,
+    dose_per_movie, pre_dose, write_tilt_order_files):
     do_any_doseweighting = do_motioncor2_doseweighting or do_custom_doseweighting
     doses_list = None
     tilt_order_path = folder + '/' + tilt_order_filename
@@ -381,19 +440,41 @@ def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt
         order_list = tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts, starting_tilt_angle)
         order_list = validate_tilt_order(order_list, total_tilts, tomo_name)
 
-    #Parse doses
+    # Parse doses
     if do_any_doseweighting and doses_list == None:
-        doses_list = [(item*dose_per_movie)+pre_dose for item in order_list]
+        doses_list = [(item * dose_per_movie) + pre_dose for item in order_list]
         doses_list = validate_doses(doses_list, total_tilts, tomo_name)
 
     if do_any_doseweighting:
         print('Applying dose weighting; %s' % display_number_list(doses_list))
         if do_motioncor2_doseweighting:
-            print("Motioncor2 doseweighting on. Note that motioncor2 doseweighting with -InitDose currently doesn't work! Also doses given will be minus the dose_per_movie to give initial doses")
+            print(
+            "Motioncor2 doseweighting on. Note that motioncor2 doseweighting with -InitDose currently doesn't work! Also doses given will be minus the dose_per_movie to give initial doses")
 
     if write_tilt_order_files and (not os.path.isfile(tilt_order_path) or overwrite_existing_tilt_order_files):
         write_tilt_order(order_list, doses_list, folder)
 
+    return order_list, doses_list, tilt_order_path
+
+
+def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt_scheme, dose_per_movie, min_angle, angle_step,
+         pixel_size, binning, throw, trunc, gpu, only_do_unfinished, do_motioncor2_doseweighting,
+         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations, starting_tilt_angle, crop):
+    #Read files
+    file_list = glob.glob(folder + '/' + input_files)
+    if sort_by_name:
+        file_list = sorted(file_list)
+    else:
+        file_list.sort(key=os.path.getmtime)
+    total_tilts = len(file_list)
+
+    #Parse tilt information
+    print('\n')
+    print('Tilt Series; %s' % tomo_name)
+
+    order_list, doses_list, tilt_order_path = parse_tilt_order_and_dose(folder, do_motioncor2_doseweighting, do_custom_doseweighting, use_tilt_order_files,
+                                                custom_tilt_order, total_tilts, tilt_scheme, min_angle, angle_step, starting_tilt_angle,
+                                                tomo_name, dose_per_movie, pre_dose, write_tilt_order_files)
 
     tomo_root = folder + '/' + tomo_name
     motioncor_file = folder + '/' + motioncor_file_name + '.sh'
@@ -410,8 +491,8 @@ def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt
         motioncor_image_path = os.path.splitext(movie)[0] + '_' + motioncor_file_suffix + order_string + '.mrc'
         motioncor_image_paths[order_list.index(i + 1)] = motioncor_image_path
         dw_motioncor_image_paths[order_list.index(i + 1)] = os.path.splitext(motioncor_image_path)[0] + dose_weight_suffix + '.mrc'
-        motioncor_line = '%s -InMrc %s -OutMrc %s -FtBin %d -Patch %d %d -Gpu %d -Iter %d -Throw %d -Trunc %d' % (
-            motioncor2, movie, motioncor_image_path, binning, patch, patch, gpu, iterations, throw, trunc)
+        motioncor_line = '%s -InMrc %s -OutMrc %s -FtBin %d -Patch %d %d -Gpu %d -Iter %d -Throw %d -Trunc %d -Crop %d %d' % (
+            motioncor2, movie, motioncor_image_path, binning, patch, patch, gpu, iterations, throw, trunc, crop[0], crop[1])
         if do_motioncor2_doseweighting:
             dose_per_frame = dose_per_movie / frames
             initdose = doses_list[order_list.index(i + 1)] - dose_per_movie #it's the dose at the start that is needed.
@@ -445,11 +526,55 @@ def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt
     return motioncor_file
 
 
+def add_ctf_estimate_line(file_to_append_to, input_folders, folder_list, binning, pixel_size, gpu,
+     tomo_name, tilt_scheme, min_angle, angle_step, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, starting_tilt_angle,
+     only_make_sorted_ctf_mic_star, only_print_ctf_command, rln_version, ctf_software,
+     CS, HT, AmpCnst, Box, ResMin, ResMax, dFMin, dFMax, FStep, dAst, ctfWin, cores, ctf_exe, ctf_star, only_do_unfinished):
+    pixel_size = pixel_size*binning
+    pixel_size_line = '--pixel_size %f' % (pixel_size)
+    #input arguments
+    if input_folders != None:
+        input_folders_line = '--input_folders "%s"' % (input_folders)
+        input_files_line = '-i "*%s??.mrc"' % motioncor_file_suffix
+    else:
+        input_folders_line = ''
+        input_files_line = '-i "%s/*%s??.mrc"' % (folder_list[0], motioncor_file_suffix)
+    #other arguments
+    input_values_null = {'tilt_scheme': tilt_scheme, 'min_angle': min_angle, 'angle_step': angle_step, 'custom_tilt_order': custom_tilt_order}
+    input_values_default = {'tomo_name': (tomo_name, default_tomo_name), 'starting_tilt_angle': (starting_tilt_angle, default_starting_tilt_angle), 'rln_version': (rln_version,default_rln_version), 'ctf_software': (ctf_software, default_ctf_software),
+     'CS': (CS,default_CS), 'HT': (HT,default_HT), 'AmpCnst': (AmpCnst,default_AmpCnst), 'Box': (Box,default_Box), 'ResMin': (ResMin,default_ResMin), 'ResMax': (ResMax,default_ResMax), 'dFMin': (dFMin,default_dFMin), 'dFMax': (dFMax,default_dFMax), 'FStep': (FStep,default_FStep), 'dAst': (dAst,default_dAst), 'ctfWin': (ctfWin,default_ctfWin), 'cores': (cores,default_cores), 'ctf_exe': (ctf_exe,default_ctf_exe), 'ctf_star': (ctf_star,default_ctf_star), 'gpu':(gpu, default_gpu)}
+    input_options = {'use_tilt_order_files': use_tilt_order_files, 'write_tilt_order_files': write_tilt_order_files, 'only_make_sorted_mic_star': only_make_sorted_ctf_mic_star, 'only_print_command': only_print_ctf_command}
+    if pass_only_do_unfinished_to_ctf_estimation:
+        input_options['only_do_unfinished'] = only_do_unfinished
+    lines_list = []
+    for value_name, value in input_values_null.iteritems():
+        if value != None:
+            lines_list.append('--%s %s' % (value_name, str(value)))
+    for value_name, (value, default_value) in input_values_default.iteritems():
+        if value != default_value:
+            lines_list.append('--%s %s' % (value_name, str(value)))
+    for option_name, option in input_options.iteritems():
+        if option:
+            lines_list.append('--%s' % option_name)
+    other_options_line = ' '.join(lines_list)
+    ctf_estimation_line = '%s %s %s %s %s' % (ctf_estimation_script, input_folders_line, input_files_line, pixel_size_line, other_options_line)
+    print(ctf_estimation_line)
+    f = open(file_to_append_to, 'a')
+    f.write(ctf_estimation_line+'\n')
+    f.close()
+    return
+
+
+
+
 
 def main(motioncor2, frames, input_files, input_folders, tomo_name, tilt_scheme, dose_per_movie, min_angle, angle_step,
          pixel_size, binning, throw, trunc, gpu, only_make_batch_file, only_do_unfinished, do_motioncor2_doseweighting,
          do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations,
-         starting_tilt_angle):
+         starting_tilt_angle, crop,
+         only_make_sorted_ctf_mic_star, only_print_ctf_command, rln_version, ctf_software,
+         CS, HT, AmpCnst, Box, ResMin, ResMax, dFMin, dFMax, FStep,
+         dAst, ctfWin, cores, ctf_exe, ctf_star, do_ctf_estimation):
     if input_folders != None:
         folder_list = sorted(glob.glob(input_folders))
         batch_f = open(batch_file_name, 'w')
@@ -464,7 +589,7 @@ def main(motioncor2, frames, input_files, input_folders, tomo_name, tilt_scheme,
         #Main script for individual tilt series
         motioncor_file = tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt_scheme, dose_per_movie, min_angle, angle_step,
          pixel_size, binning, throw, trunc, gpu, only_do_unfinished, do_motioncor2_doseweighting,
-         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations, starting_tilt_angle)
+         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations, starting_tilt_angle, crop)
 
         if input_folders != None:
             batch_f.write(motioncor_file + '\n')
@@ -472,6 +597,17 @@ def main(motioncor2, frames, input_files, input_folders, tomo_name, tilt_scheme,
     if input_folders != None:
         batch_f.close()
         make_executable(batch_file_name)
+        file_for_ctf_estimation_line = batch_file_name
+    else:
+        file_for_ctf_estimation_line = motioncor_file
+
+    if do_ctf_estimation:
+        add_ctf_estimate_line(file_for_ctf_estimation_line, input_folders, folder_list, binning, pixel_size, gpu,
+                          tomo_name, tilt_scheme, min_angle, angle_step, use_tilt_order_files, custom_tilt_order,
+                          write_tilt_order_files, starting_tilt_angle,
+                          only_make_sorted_ctf_mic_star, only_print_ctf_command, rln_version, ctf_software,
+                          CS, HT, AmpCnst, Box, ResMin, ResMax, dFMin, dFMax, FStep, dAst, ctfWin, cores, ctf_exe,
+                          ctf_star, only_do_unfinished)
 
     if only_make_batch_file != True:
         if input_folders == None:
@@ -494,9 +630,10 @@ if __name__ == "__main__":
          args.dose_per_movie, args.min_angle, args.angle_step, args.pixel_size, args.binning, args.throw, args.trunc,
          args.gpu, args.only_make_batch_file, args.only_do_unfinished, args.do_motioncor2_doseweighting,
          args.do_custom_doseweighting, args.pre_dose, args.use_tilt_order_files, args.custom_tilt_order,
-         args.write_tilt_order_files, args.patch, args.iterations, args.starting_angle)
-
-
+         args.write_tilt_order_files, args.patch, args.iterations, args.starting_angle, args.crop,
+         args.only_make_sorted_ctf_mic_star, args.only_print_ctf_command, args.rln_version, args.ctf_software,
+         args.CS, args.HT, args.AmpCnst, args.Box, args.ResMin, args.ResMax, args.dFMin, args.dFMax, args.FStep,
+         args.dAst, args.ctfWin, args.cores, args.ctf_exe, args.ctf_star, args.do_ctf_estimation)
 
 
 
