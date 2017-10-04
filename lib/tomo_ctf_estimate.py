@@ -235,6 +235,7 @@ def main(input_files, input_folders, mic_star, tomo_name, tilt_scheme, min_angle
     if mic_star == None:
         if input_folders != None:
             folder_list = sorted(glob.glob(input_folders))
+            folder_list = [dir for dir in folder_list if os.path.isdir(dir)]
         else:
             folder = '/'.join(input_files.split('/')[0:-1])
             folder_list = ['.'] if folder == '' else [folder]
