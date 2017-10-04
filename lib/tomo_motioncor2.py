@@ -579,9 +579,7 @@ def main(motioncor2, frames, input_files, input_folders, tomo_name, tilt_scheme,
          dAst, ctfWin, cores, ctf_exe, ctf_star, do_ctf_estimation):
     if input_folders != None:
         folder_list = sorted(glob.glob(input_folders))
-        print(folder_list)
         folder_list = [dir for dir in folder_list if os.path.isdir(dir)]
-        print(folder_list)
         batch_f = open(batch_file_name, 'w')
     else:
         folder = '/'.join(input_files.split('/')[0:-1])
