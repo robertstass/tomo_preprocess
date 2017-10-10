@@ -28,7 +28,7 @@ class ArgumentParser():
         add_g('-i', '--imod_edf_files', default=None,
               help='A wild card expression (IN QUOTES!) to multiple imod project files (with the ".edf" extension)')
         add_g('--ctf_star',  help='An ordered relion star file with ctf parameters estimated. Micrographs must be ordered (-ve to +ve) and separated by tilt series.')
-        add_g('-v', '--version', default=3, type=int, help='Which version of the imod defocus file would you like to write? (2 or 3?) Version 3 files include astigmatism values and will only work with later versions of imod (imod_4.9+)')
+        add_g('-v', '--version', default='3', help='Which version of the imod defocus file would you like to write? (2 or 3?) Version 3 files include astigmatism values and will only work with later versions of imod (imod_4.9+). You can also use option "star" to write separate relion star files to each folder or "novactf" to write ctffind4-like defocus files to each folder. Astigmatism angles will not be rotated for these 2 options.')
 
 
         if len(sys.argv) == 1:  # if no args print usage.
@@ -52,12 +52,19 @@ class ArgumentParser():
         if not os.path.isfile(args.ctf_star):
             self.error('No star file found. "%s"' % (args.ctf_star))
             sys.exit(2)
-        if args.version != 3 and args.version != 2:
-            self.error('version %d not supported. Must be 2 or 3.' % (args.version))
+        if args.version not in accepted_versions:
+            self.error('version %s not supported. Must be from this list; %s.' % (args.version, ', '.join(accepted_versions)))
             sys.exit(2)
 
 
 
+
+
+#Nitpicky details
+accepted_versions = ('2', '3', 'novactf', 'star')
+star_append = '_defocus.star'
+novactf_append = '_novactf_defocus.txt'
+ctffind4_header_line = '# Columns: #1 - micrograph number; #2 - defocus 1 [Angstroms]; #3 - defocus 2; #4 - azimuth of astigmatism; #5 - additional phase shift [radians]; #6 - cross correlation; #7 - spacing (in Angstroms) up to which CTF rings were fit successfully' #may not be needed
 
 
 
@@ -70,12 +77,16 @@ def split_by_folder(md):
         if folder == current_dir:
             temp_md.addItem(p)
         else:
+            temp_md.addLabels(md.getLabels())
             md_dict[current_dir] = temp_md
             current_dir = folder
             temp_md = MetaData()
             temp_md.addItem(p)
+    temp_md.addLabels(md.getLabels())
     md_dict[current_dir] = temp_md
     return md_dict
+
+
 
 def read_tilt_angles(tlt_path):
     f = open(tlt_path,'r')
@@ -117,13 +128,19 @@ def xfToRot(a11, a12, a21, a22, dx, dy):
     return theta
 
 
-def write_imod_defocus_file(md, imod_folder, tomo_name, version):
+def get_imod_file_root(tomo_name, imod_folder):
     if tomo_name == None:
         tomo_name = os.path.basename(imod_folder)
     slash_noslash = '' if imod_folder == "" else '/'
-    defocus_file_name = '%s%s%s.defocus' % (imod_folder, slash_noslash, tomo_name)
-    tlt_file_name = '%s%s%s.tlt' % (imod_folder, slash_noslash, tomo_name)
-    xf_file_name = '%s%s%s.xf' % (imod_folder, slash_noslash, tomo_name)
+    imod_file_root = '%s%s%s' % (imod_folder, slash_noslash, tomo_name)
+    return imod_file_root
+
+
+def write_imod_defocus_file(md, imod_folder, tomo_name, version):
+    imod_file_root = get_imod_file_root(tomo_name, imod_folder)
+    defocus_file_name = '%s.defocus' % (imod_file_root)
+    tlt_file_name = '%s.tlt' % (imod_file_root)
+    xf_file_name = '%s.xf' % (imod_file_root)
     if not os.path.isfile(tlt_file_name):
         print('Cannot find "%s". Make sure the tilt series has been aligned before executing this script!' % tlt_file_name)
         return
@@ -140,7 +157,12 @@ def write_imod_defocus_file(md, imod_folder, tomo_name, version):
         print('Number of tilts in .tlt does not match star file!')
 
     if version == 3:
-        f.write('1 0  0. 0. 0 3\n')
+        defocus_file_flag = 1
+        phase_shifts_included = False
+        if 'rlnPhaseShift' in md.getLabels():
+            phase_shifts_included = True
+            defocus_file_flag = defocus_file_flag+4
+        f.write('%d 0  0. 0. 0 3\n' % defocus_file_flag)
         for i, (p, tlt, xform) in enumerate(zip(md, tilt_list, transform_list)):
             defocusU = p.rlnDefocusU / 10
             defocusV = p.rlnDefocusV / 10
@@ -152,6 +174,8 @@ def write_imod_defocus_file(md, imod_folder, tomo_name, version):
                 defocusV = tempV
                 defocusAng = defocusAng - 90
             line = '%d\t%d\t%f\t%f\t%f\t%f\t%f' % (i + 1, i + 1, tlt, tlt, defocusU, defocusV, defocusAng)
+            if phase_shifts_included:
+                line = '%s\t%f' % (line, float(p.rlnPhaseShift))
             f.write(line + '\n')
     elif version ==2:
         for i, (p, tlt) in enumerate(zip(md, tilt_list)):
@@ -161,6 +185,36 @@ def write_imod_defocus_file(md, imod_folder, tomo_name, version):
             f.write(line + '\n')
     f.close()
     print('An imod defocus file (version %d) has been created at %s' % (version, defocus_file_name))
+
+
+def write_separate_stars(md, imod_folder, tomo_name, append):
+    imod_file_root = get_imod_file_root(tomo_name, imod_folder)
+    star_path = '%s%s' % (imod_file_root, star_append)
+    md.write(star_path)
+    print('Star file written to %s' % star_path)
+
+def write_nova_ctf_defocus(md, imod_folder, tomo_name, append):
+    imod_file_root = get_imod_file_root(tomo_name, imod_folder)
+    defocus_path = '%s%s' % (imod_file_root, novactf_append)
+    f = open(defocus_path, 'w')
+    f.write(ctffind4_header_line+'\n')
+    for i,p in enumerate(md):
+        mic_num = i+1
+        defocusU = p.rlnDefocusU
+        defocusV = p.rlnDefocusV
+        defocusAngle = p.rlnDefocusAngle
+        if 'rlnPhaseShift' in md.getLabels():
+            phase_shift = math.radians(float(p.rlnPhaseShift))
+        else:
+            phase_shift = 0.0
+        cc = float(p.rlnCtfFigureOfMerit) if 'rlnCtfFigureOfMerit' in md.getLabels() else 0
+        ctf_maxres = float(p.rlnCtfMaxResolution) if 'rlnCtfMaxResolution' in md.getLabels() else 0
+        line = '%d\t%f\t%f\t%f\t%f\t%f\t%f' % (mic_num, defocusU, defocusV, defocusAngle, phase_shift, cc, ctf_maxres)
+        f.write(line+'\n')
+    f.close()
+    print('NovaCTF defocus file (in the style of ctffind4) written to %s' % defocus_path)
+
+
 
 
 def main(imod_edf_files, ctf_star, version):
@@ -173,11 +227,15 @@ def main(imod_edf_files, ctf_star, version):
     for edf_folder, edf_name in zip(edf_folders,edf_names):
         try:
             md = md_dict[edf_folder]
-            write_imod_defocus_file(md, edf_folder, edf_name, version)
         except:
             print('imod folder "%s" not found in the star file.' % edf_folder)
-
-
+            continue
+        if version == '2' or version == '3':
+            write_imod_defocus_file(md, edf_folder, edf_name, int(version))
+        elif version == 'novactf':
+            write_nova_ctf_defocus(md, edf_folder, edf_name, novactf_append)
+        elif version == 'star':
+            write_separate_stars(md, edf_folder, edf_name, star_append)
 
 if __name__ == "__main__":
     argparser = ArgumentParser()
