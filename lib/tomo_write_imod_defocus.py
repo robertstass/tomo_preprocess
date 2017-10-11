@@ -175,7 +175,8 @@ def write_imod_defocus_file(md, imod_folder, tomo_name, version):
                 defocusAng = defocusAng - 90
             line = '%d\t%d\t%f\t%f\t%f\t%f\t%f' % (i + 1, i + 1, tlt, tlt, defocusU, defocusV, defocusAng)
             if phase_shifts_included:
-                line = '%s\t%f' % (line, float(p.rlnPhaseShift))
+                zero_to_360_phase_shift = float(p.rlnPhaseShift) % 360 #imod does not deal with negative phase shifts well i think so convert them.
+                line = '%s\t%f' % (line, zero_to_360_phase_shift)
             f.write(line + '\n')
     elif version ==2:
         for i, (p, tlt) in enumerate(zip(md, tilt_list)):
