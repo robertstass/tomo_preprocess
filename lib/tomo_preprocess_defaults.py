@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-
 #Strubi
 default_motioncor2_exe = 'MotionCor2'
 default_ctf_exe = "/raid/44/juha/apps/ctffind4/ctffind"
@@ -9,7 +8,6 @@ default_ctf_exe = "/raid/44/juha/apps/ctffind4/ctffind"
 ctffind4: /raid/44/juha/apps/ctffind4/ctffind
 ctffind3: /raid/44/juha/apps/ctffind/ctffind3.exe
 '''
-
 
 
 #Rescomp

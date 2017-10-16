@@ -228,10 +228,6 @@ def tilt_info_validation(self, args):
 
 
 
-
-
-
-
 ## Nitpicky details
 default_motioncor2_exe = default_motioncor2_exe
 motioncor_file_suffix = 'motioncor_tilt_'

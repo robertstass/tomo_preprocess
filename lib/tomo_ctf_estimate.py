@@ -154,7 +154,6 @@ def ctf_estimation_argument_validation(self, args):
             if not os.path.exists(args.ctf_exe):
                 self.error('Cannot find the ctf executable at path %s' % args.ctf_exe)
 
-
 #Nitpicky details
 default_micrograph_star_file = 'micrographs.star'
 default_ctf_star = 'ctf.star'
