@@ -57,9 +57,6 @@ class ArgumentParser():
             sys.exit(2)
 
 
-
-
-
 #Nitpicky details
 accepted_versions = ('2', '3', 'novactf', 'star')
 star_append = '_defocus.star'
