@@ -25,11 +25,11 @@ class ArgumentParser():
 
         add_g = general_args.add_argument  # shortcut
 
-        add_g('-i', '--imod_edf_files', default=None,
+        add_g('-i', '--imod_edf_files', default=None, required=True,
               help='A wild card expression (IN QUOTES!) to multiple imod project files (with the ".edf" extension)')
-        add_g('--ctf_star',  help='An ordered relion star file with ctf parameters estimated. Micrographs must be ordered (-ve to +ve) and separated by tilt series.')
+        add_g('--ctf_star', required=True,  help='An ordered relion star file with ctf parameters estimated. Micrographs must be ordered (-ve to +ve) and separated by tilt series.')
         add_g('-v', '--version', default='3', help='Which version of the imod defocus file would you like to write? (2 or 3?) Version 3 files include astigmatism values and will only work with later versions of imod (imod_4.9+). You can also use option "star" to write separate relion star files to each folder or "novactf" to write ctffind4-like defocus files to each folder. Astigmatism angles will not be rotated for these 2 options.')
-
+        add_g('--average_by_angle', type=int, help='Optional argument to average the defocus values for angles within +- of this angle and apply it to the rest')
 
         if len(sys.argv) == 1:  # if no args print usage.
             self.usage()
@@ -65,8 +65,10 @@ accepted_versions = ('2', '3', 'novactf', 'star')
 star_append = '_defocus.star'
 novactf_append = '_novactf_defocus.txt'
 ctffind4_header_line = '# Columns: #1 - micrograph number; #2 - defocus 1 [Angstroms]; #3 - defocus 2; #4 - azimuth of astigmatism; #5 - additional phase shift [radians]; #6 - cross correlation; #7 - spacing (in Angstroms) up to which CTF rings were fit successfully' #may not be needed
-
-
+use_estimated_tilt_angles = True #True = will get tilt angles from the .tlt file. False = will use the .rawtlt file which will likely be more consistent.
+do_average_phase_shift = True
+write_averaged_defocus_star = True
+averaged_defocus_star_file = 'averaged_defocus_by_angle_ctf.star'
 
 def split_by_folder(md):
     current_dir = os.path.dirname(md._data[0].rlnMicrographName) if os.path.dirname(md._data[0].rlnMicrographName) != "" else '.'
@@ -173,6 +175,8 @@ def write_imod_defocus_file(md, imod_folder, tomo_name, version):
                 defocusU = defocusV
                 defocusV = tempV
                 defocusAng = defocusAng - 90
+            if defocusU == defocusV:
+                defocusAng = 0
             line = '%d\t%d\t%f\t%f\t%f\t%f\t%f' % (i + 1, i + 1, tlt, tlt, defocusU, defocusV, defocusAng)
             if phase_shifts_included:
                 zero_to_360_phase_shift = float(p.rlnPhaseShift) % 360 #imod does not deal with negative phase shifts well i think so convert them.
@@ -217,14 +221,76 @@ def write_nova_ctf_defocus(md, imod_folder, tomo_name, append):
 
 
 
+def average_defocus_outside_angle(md_dict, edf_folders, edf_names, angle, do_average_phase_shift):
+    corrected_md_dict = {}
+    corrected_md = MetaData()
+    labels = md_dict[edf_folders[0]].getLabels()
+    do_average_phase_shift = False if 'rlnPhaseShift' not in labels else do_average_phase_shift
+    corrected_md.addLabels(labels)
+    for edf_folder, edf_name in zip(edf_folders,edf_names):
+        try:
+            md = md_dict[edf_folder]
+        except:
+            print('imod folder "%s" not found in the star file.' % edf_folder)
+            continue
+        imod_file_root = get_imod_file_root(edf_name, edf_folder)
+        if use_estimated_tilt_angles:
+            tlt_file_name = '%s.tlt' % (imod_file_root)
+        else:
+            tlt_file_name = '%s.rawtlt' % (imod_file_root)
+        if not os.path.isfile(tlt_file_name):
+            print('Cannot find "%s". Make sure the tilt series has been aligned before executing this script!' % tlt_file_name)
+            return
+        tilt_list = read_tilt_angles(tlt_file_name)
+        average_list = []
+        average_md = MetaData()
+        apply_list = []
+        for i,(tilt,p) in enumerate(zip(tilt_list, md)):
+            if abs(tilt) <= abs(angle):
+                average_list.append(i)
+                average_md.addItem(p)
+            else:
+                apply_list.append(i)
+        if len(average_list) == 0: #check that averaging is possible
+            print('No tilt angles found with the range specified for %s' % edf_name)
+            corrected_md_dict[edf_folder] = md
+            corrected_md.addData(md)
+            continue
+        if len(apply_list) == 0:
+            print('No tilt angles found outside the range specified to apply defocus to for %s' % edf_name)
+            corrected_md_dict[edf_folder] = md
+            corrected_md.addData(md)
+            continue
+        #caluclate the average
+        average = sum([(p.rlnDefocusU+p.rlnDefocusV)/2 for p in average_md])/len(average_list)
+        if do_average_phase_shift:
+            phase_average = sum([float(p.rlnPhaseShift) for p in average_md])/len(average_list)
+        print('Taking the average defocus of tilts %d to %d (%f angstrom) and applying it to the following tilts for %s; %s' % (min(average_list)+1, max(average_list)+1, average, edf_name, ', '.join([str(apply+1) for apply in apply_list])))
+        if do_average_phase_shift:
+            print('Also applying the average phase shift (%f degrees) to those tilts' % (phase_average))
+        for i,p in enumerate(md):
+            if i in apply_list:
+                p.rlnDefocusU = average
+                p.rlnDefocusV = average
+                p.rlnDefocusAngle = 0
+                if do_average_phase_shift:
+                    p.rlnPhaseShift = phase_average
+        corrected_md_dict[edf_folder] = md
+        corrected_md.addData(md)
+    if write_averaged_defocus_star:
+        print('Writing out star file with averaged defocus values to %s' % averaged_defocus_star_file)
+        corrected_md.write(averaged_defocus_star_file)
+    return corrected_md_dict
 
-def main(imod_edf_files, ctf_star, version):
+def main(imod_edf_files, ctf_star, version, average_by_angle):
     edf_list = sorted(glob.glob(imod_edf_files))
     edf_folders = [os.path.dirname(i) for i in edf_list]
     edf_folders = ['.'] if edf_folders == [''] else edf_folders
     edf_names = [os.path.splitext(os.path.basename(i))[0] for i in edf_list]
     ctf_md = MetaData(ctf_star)
     md_dict = split_by_folder(ctf_md)
+    if average_by_angle != None:
+        md_dict = average_defocus_outside_angle(md_dict, edf_folders, edf_names, average_by_angle, do_average_phase_shift)
     for edf_folder, edf_name in zip(edf_folders,edf_names):
         try:
             md = md_dict[edf_folder]
@@ -243,4 +309,4 @@ if __name__ == "__main__":
     args = argparser.parser.parse_args()
     argparser.validate(args)
 
-    main(args.imod_edf_files, args.ctf_star, args.version)
+    main(args.imod_edf_files, args.ctf_star, args.version, args.average_by_angle)

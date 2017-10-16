@@ -7,6 +7,7 @@ import sys
 import argparse
 from distutils import spawn
 from tomo_motioncor2 import *
+from tomo_preprocess_defaults import *
 try:
     from pyrelion import MetaData, Item
 except:
@@ -180,7 +181,7 @@ default_dFMax = 50000
 default_FStep = 500
 default_dAst = 100
 default_ctfWin = -1
-default_ctf_exe = "/raid/44/juha/apps/ctffind4/ctffind"
+default_ctf_exe = default_ctf_exe # from defaults file
 default_cores = 1
 default_gpu = 0
 

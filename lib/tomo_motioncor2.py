@@ -7,7 +7,7 @@ import sys
 import argparse
 from distutils import spawn
 from tomo_ctf_estimate import *
-
+from tomo_preprocess_defaults import *
 
 class ArgumentParser():
     def __init__(self):
@@ -233,7 +233,7 @@ def tilt_info_validation(self, args):
 
 
 ## Nitpicky details
-default_motioncor2_exe = 'MotionCor2'
+default_motioncor2_exe = default_motioncor2_exe
 motioncor_file_suffix = 'motioncor_tilt_'
 dose_weight_suffix = '_DW'  # set by motioncor
 motioncor_file_name = 'tomo_motioncor2'
