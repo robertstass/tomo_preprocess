@@ -273,7 +273,7 @@ class DoseWeight:
     def overlay_filter(self, img, filter_array):
         fft = np.fft.fftshift(np.fft.fft2(img))
         filtered_fft = np.multiply(fft, filter_array)
-        filtered_img = np.absolute(np.fft.ifft2(np.fft.ifftshift(filtered_fft)), dtype='float32')
+        filtered_img = np.real(np.fft.ifft2(np.fft.ifftshift(filtered_fft))).astype('float32')
         return filtered_img
 
 
