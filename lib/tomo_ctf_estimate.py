@@ -47,7 +47,7 @@ class ArgumentParser():
               help='The minimum (most negative) angle used in the tilt series')
         add_t('--angle_step', type=float, help='The angular step between tilt images')
         add_t('--starting_angle', type=float, default=default_starting_tilt_angle, help='(optional) The starting tilt angle. Only used for bidirectional and dose symmetric tilt schemes.')
-
+        add_t('--dose_symmetric_group_size', type=int, default=default_dose_symmetric_group_size, help='The group size for grouped dose symmetric tilt schemes. (eg 3 gives; 13,12,11,7,6,5,1,2,3,4,8,9,10)')
 
         add_c('--rln_version', type=int, default=default_rln_version, help='Relion version 1 or 2 (1 < 1.6 and 2 = 2+)')
         add_c('--ctf_software', type=str, default=default_ctf_software, help='Which ctf estimation software to use. You must input one of the following options %s. NB gctf only works with relion 2+.' % ', '.join(ctf_software_options))
@@ -197,7 +197,7 @@ XMAG = default_XMAG #default to 10000 so you can just use the pixel size as DSte
 
 
 
-def write_sorted_mic_star(folder, input_files,  use_tilt_order_files, custom_tilt_order, tilt_scheme, min_angle, angle_step, starting_tilt_angle, tomo_name, write_tilt_order_files, mic_id):
+def write_sorted_mic_star(folder, input_files,  use_tilt_order_files, custom_tilt_order, tilt_scheme, min_angle, angle_step, starting_tilt_angle, tomo_name, write_tilt_order_files, mic_id,dose_symmetric_group_size):
     file_list = glob.glob(folder + '/' + input_files)
     if sort_by_name:
         file_list = sorted(file_list)
@@ -216,7 +216,7 @@ def write_sorted_mic_star(folder, input_files,  use_tilt_order_files, custom_til
                                                                         custom_tilt_order, total_tilts, tilt_scheme,
                                                                         min_angle, angle_step,
                                                                         starting_tilt_angle, tomo_name,
-                                                                        None, None, write_tilt_order_files)
+                                                                        None, None, write_tilt_order_files,dose_symmetric_group_size)
     if not used_custom_or_file_tilt_order:
         tilt_list = [min_angle + (angle_step * i) for i in range(0, total_tilts)]
     else:
@@ -281,7 +281,7 @@ def run_ctffind(micrograph_star_file, ctf_star, pixel_size, ctfWin, CS, HT, AmpC
 
 def main(input_files, input_folders, mic_star, tomo_name, tilt_scheme, min_angle, angle_step, pixel_size, only_make_sorted_mic_star, only_do_unfinished,
          use_tilt_order_files, custom_tilt_order, write_tilt_order_files, starting_tilt_angle, only_print_command, rln_version, ctf_software, CS, HT, AmpCnst, Box, ResMin, ResMax, dFMin, dFMax, FStep, dAst, ctfWin, cores, gpu, ctf_exe, ctf_star,
-         write_tilt_angle_star, do_phaseshift, phase_min, phase_max, phase_step):
+         write_tilt_angle_star, do_phaseshift, phase_min, phase_max, phase_step, dose_symmetric_group_size):
 
     if mic_star == None:
         if input_folders != None:
@@ -299,7 +299,7 @@ def main(input_files, input_folders, mic_star, tomo_name, tilt_scheme, min_angle
                 tomo_name = folder.split('/')[-1]
 
             #Main script for individual tilt series
-            tomo_mic_md, mic_id = write_sorted_mic_star(folder, input_files, use_tilt_order_files, custom_tilt_order, tilt_scheme, min_angle, angle_step, starting_tilt_angle, tomo_name, write_tilt_order_files, mic_id)
+            tomo_mic_md, mic_id = write_sorted_mic_star(folder, input_files, use_tilt_order_files, custom_tilt_order, tilt_scheme, min_angle, angle_step, starting_tilt_angle, tomo_name, write_tilt_order_files, mic_id, dose_symmetric_group_size)
             mic_md.addData(tomo_mic_md)
 
         mic_md.addLabels(['rlnMicrographName'])
@@ -333,6 +333,6 @@ if __name__ == "__main__":
     # main(motioncor2,frames,input_files,input_folders,tomo_name,tilt_scheme,dose_per_movie,min_angle,angle_step,pixel_size,binning,throw,trunc,gpu, only_make_batch_file, only_do_unfinished, skip_building_full_stack)
     main(args.input_files, args.input_folders, args.mic_star, args.tomo_name, args.tilt_scheme, args.min_angle, args.angle_step, args.pixel_size, args.only_make_sorted_mic_star, args.only_do_unfinished, args.use_tilt_order_files, args.custom_tilt_order, args.write_tilt_order_files, args.starting_angle, args.only_print_command, args.rln_version, args.ctf_software,
          args.CS, args.HT, args.AmpCnst, args.Box, args.ResMin, args.ResMax, args.dFMin, args.dFMax, args.FStep, args.dAst, args.ctfWin, args.cores, args.gpu, args.ctf_exe, args.ctf_star,
-        args.write_tilt_angle_star, args.do_phaseshift, args.phase_min, args.phase_max, args.phase_step)
+        args.write_tilt_angle_star, args.do_phaseshift, args.phase_min, args.phase_max, args.phase_step, args.dose_symmetric_group_size)
 
 
