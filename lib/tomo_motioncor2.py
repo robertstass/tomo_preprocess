@@ -50,7 +50,7 @@ class ArgumentParser():
         add_t('--angle_step', type=float, help='The angular step between tilt images')
         add_t('--starting_angle', type=float, default=default_starting_tilt_angle, help='(optional) The starting tilt angle. Only used for bidirectional and dose symmetric tilt schemes.')
         add_t('--dose_symmetric_group_size', type=int, default=default_dose_symmetric_group_size, help='The group size for grouped dose symmetric tilt schemes. (eg 3 gives; 13,12,11,7,6,5,1,2,3,4,8,9,10)')
-
+        add_t('--dose_symmetric_groups_not_centered', action='store_true', help='Set this if your grouped dose symmetric tilt scheme is not centered around the first image. otherwise ignored. (eg 12,11,10,6,5,4,1,2,3,7,8,9,13)')
 
         add_m('--motioncor2', default=default_motioncor2_exe, help='Location of the motioncor2 executable')
         add_m('--throw', default=0, type=int, help='Discard this number of frames from the start of each movie')
@@ -267,7 +267,8 @@ accepted_tilt_schemes = ['continuous_positive', 'continuous_negative', 'bidirect
 starting_angle_tilt_schemes = ['bidirectional_positive', 'bidirectional_negative', 'dose_symmetric_positive', 'dose_symmetric_negative']
 dose_symmetric_tilt_schemes = ['dose_symmetric_positive', 'dose_symmetric_negative']
 
-def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index, dose_symmetric_group_size=1):
+def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index, dose_symmetric_group_size=1, dose_symmetric_groups_not_centered=False):
+    dose_symmetric_groups_not_centered = False if dose_symmetric_group_size == 1 else dose_symmetric_groups_not_centered
     centre = zero_tilt_index + 1
     if tilt_scheme == 'continuous_positive':
         tilt_order = tilt_num
@@ -292,16 +293,17 @@ def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index, dose_symmetr
         subseries_offset = centre - distance_from_edge
         sub_tilt_num = tilt_num - subseries_offset
         sub_centre = centre - subseries_offset
-        number_of_groups = int(math.ceil((int(subseries_size / 2) / float(dose_symmetric_group_size))))
-        group_num = int(math.ceil(abs((sub_tilt_num - sub_centre) / float(dose_symmetric_group_size))))
+        group_offset = 1 if dose_symmetric_groups_not_centered else 0
+        number_of_groups = int(math.ceil(((int(subseries_size / 2)+group_offset) / float(dose_symmetric_group_size))))
+        group_num = int(math.ceil(abs((sub_tilt_num - sub_centre+group_offset/2.) / float(dose_symmetric_group_size))))
         if sub_tilt_num == sub_centre:
             tilt_order = 1
         elif sub_tilt_num > sub_centre:
-            tilt_order = sub_tilt_num - sub_centre + (group_num - 1) * dose_symmetric_group_size + 1
+            tilt_order = sub_tilt_num - sub_centre + (group_num-1)*dose_symmetric_group_size +1
         else:
-            tilt_order = (sub_centre - sub_tilt_num + 1) - ((group_num - 1) * dose_symmetric_group_size) + (group_num * 2 - 1) * (dose_symmetric_group_size)
+            tilt_order = (sub_centre - sub_tilt_num + 1) - ((group_num-1)*dose_symmetric_group_size) + ((group_num)*2-1)*(dose_symmetric_group_size)-group_offset
             if group_num == number_of_groups:
-                tilt_order = tilt_order - ((group_num * dose_symmetric_group_size) - (subseries_size / 2))
+                tilt_order = tilt_order - ((group_num * dose_symmetric_group_size) - (subseries_size / 2))+group_offset
         if tilt_num <= subseries_offset:
             tilt_order = total_tilts - tilt_num + 1
         if tilt_num >= centre + distance_from_edge:
@@ -315,16 +317,17 @@ def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index, dose_symmetr
         subseries_offset = centre - distance_from_edge
         sub_tilt_num = tilt_num - subseries_offset
         sub_centre = centre - subseries_offset
-        number_of_groups = int(math.ceil((int(subseries_size / 2) / float(dose_symmetric_group_size))))
-        group_num = int(math.ceil(abs((sub_tilt_num - sub_centre) / float(dose_symmetric_group_size))))
+        group_offset = 1 if dose_symmetric_groups_not_centered else 0
+        number_of_groups = int(math.ceil(((int(subseries_size / 2) + group_offset) / float(dose_symmetric_group_size))))
+        group_num = int(math.ceil(abs((sub_tilt_num - sub_centre-group_offset/2.) / float(dose_symmetric_group_size))))
         if sub_tilt_num == sub_centre:
             tilt_order = 1
         elif sub_tilt_num < sub_centre:
-            tilt_order = (sub_centre - sub_tilt_num + 1) + (group_num - 1) * dose_symmetric_group_size
+            tilt_order = (sub_centre - sub_tilt_num + 1) + (group_num-1)*dose_symmetric_group_size
         else:
-            tilt_order = sub_tilt_num - ((group_num - 1) * dose_symmetric_group_size) - sub_centre + (group_num * 2 - 1) * (dose_symmetric_group_size) + 1
+            tilt_order = sub_tilt_num - ((group_num-1)*dose_symmetric_group_size) - sub_centre + (group_num*2-1)*(dose_symmetric_group_size)+1-group_offset
             if group_num == number_of_groups:
-                tilt_order = tilt_order - ((group_num * dose_symmetric_group_size) - (subseries_size / 2))
+                tilt_order = tilt_order - ((group_num*dose_symmetric_group_size)-(subseries_size / 2))+group_offset
         if tilt_num <= subseries_offset:
             tilt_order = total_tilts - tilt_num + 1
         if tilt_num >= centre + distance_from_edge:
@@ -333,6 +336,19 @@ def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index, dose_symmetr
         print('Tilt scheme not supported')
         raise ValueError
     return tilt_order
+
+
+def tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts, starting_tilt_angle,dose_symmetric_group_size, dose_symmetric_groups_not_centered):
+    max_angle = min_angle + (angle_step * (total_tilts - 1))
+    tilt_list = [min_angle + (angle_step * i) for i in range(0, total_tilts)]
+    zero_tilt_index = tilt_list.index(min(tilt_list, key=lambda x: abs(x - starting_tilt_angle)))
+    order_list = [tilt_order(tilt_scheme, i + 1, total_tilts, zero_tilt_index, dose_symmetric_group_size, dose_symmetric_groups_not_centered=dose_symmetric_groups_not_centered) for i in range(0, total_tilts)]
+    starting_angle_string = ' starting from %d degrees' % starting_tilt_angle if tilt_scheme in starting_angle_tilt_schemes else ''
+    ds_group_string = ' in groups of %d' % dose_symmetric_group_size if tilt_scheme in dose_symmetric_tilt_schemes and dose_symmetric_group_size != 1 else ''
+    print('Tiltseries from %d to %d degrees in steps of %d degrees%s%s (%d tilts in total) using a %s tilt scheme.' % (
+        min_angle, max_angle, angle_step, starting_angle_string, ds_group_string, total_tilts, tilt_scheme))
+    return order_list
+
 
 def csv_string_to_int_tuple(string, desired_length=None):
     split_string = string.split(',')
@@ -357,16 +373,7 @@ def make_executable(filename):
     os.chmod(filename, st.st_mode | stat.S_IEXEC)
 
 
-def tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts, starting_tilt_angle, dose_symmetric_group_size):
-    max_angle = min_angle + (angle_step * (total_tilts - 1))
-    tilt_list = [min_angle + (angle_step * i) for i in range(0, total_tilts)]
-    zero_tilt_index = tilt_list.index(min(tilt_list, key=lambda x: abs(x - starting_tilt_angle)))
-    order_list = [tilt_order(tilt_scheme, i + 1, total_tilts, zero_tilt_index, dose_symmetric_group_size) for i in range(0, total_tilts)]
-    starting_angle_string = ' starting from %d degrees' % starting_tilt_angle if tilt_scheme in starting_angle_tilt_schemes else ''
-    ds_group_string = ' in groups of %d' % dose_symmetric_group_size if tilt_scheme in dose_symmetric_tilt_schemes and dose_symmetric_group_size != 1 else ''
-    print('Tiltseries from %d to %d degrees in steps of %d degrees%s%s (%d tilts in total) using a %s tilt scheme.' % (
-        min_angle, max_angle, angle_step, starting_angle_string, ds_group_string ,total_tilts, tilt_scheme))
-    return order_list
+
 
 
 def display_number_list(number_list):
@@ -450,7 +457,7 @@ def write_tilt_order(order_list, doses_list, folder):
 
 def parse_tilt_order_and_dose(folder, do_motioncor2_doseweighting, do_custom_doseweighting, use_tilt_order_files,
     custom_tilt_order, total_tilts, tilt_scheme, min_angle, angle_step, starting_tilt_angle, tomo_name,
-    dose_per_movie, pre_dose, write_tilt_order_files, dose_symmetric_group_size):
+    dose_per_movie, pre_dose, write_tilt_order_files, dose_symmetric_group_size,dose_symmetric_groups_not_centered):
     do_any_doseweighting = do_motioncor2_doseweighting or do_custom_doseweighting
     doses_list = None
     tilt_order_path = folder + '/' + tilt_order_filename
@@ -466,7 +473,7 @@ def parse_tilt_order_and_dose(folder, do_motioncor2_doseweighting, do_custom_dos
         used_custom_or_file_tilt_order = True
         print('Using custom tilt order; %s' % display_number_list(order_list))
     else:
-        order_list = tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts, starting_tilt_angle, dose_symmetric_group_size)
+        order_list = tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts, starting_tilt_angle, dose_symmetric_group_size,dose_symmetric_groups_not_centered)
         order_list = validate_tilt_order(order_list, total_tilts, tomo_name)
 
     # Parse doses
@@ -488,7 +495,7 @@ def parse_tilt_order_and_dose(folder, do_motioncor2_doseweighting, do_custom_dos
 
 def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt_scheme, dose_per_movie, min_angle, angle_step,
          pixel_size, binning, throw, trunc, gpu, only_do_unfinished, do_motioncor2_doseweighting,
-         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations, starting_tilt_angle, crop, dose_symmetric_group_size):
+         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations, starting_tilt_angle, crop, dose_symmetric_group_size,dose_symmetric_groups_not_centered):
     #Read files
     file_list = glob.glob(folder + '/' + input_files)
     if sort_by_name:
@@ -509,7 +516,7 @@ def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt
 
     order_list, doses_list, tilt_order_path, used_custom_or_file_tilt_order = parse_tilt_order_and_dose(folder, do_motioncor2_doseweighting, do_custom_doseweighting, use_tilt_order_files,
                                                 custom_tilt_order, total_tilts, tilt_scheme, min_angle, angle_step, starting_tilt_angle,
-                                                tomo_name, dose_per_movie, pre_dose, write_tilt_order_files, dose_symmetric_group_size)
+                                                tomo_name, dose_per_movie, pre_dose, write_tilt_order_files, dose_symmetric_group_size,dose_symmetric_groups_not_centered)
 
     tomo_root = folder + '/' + tomo_name
     motioncor_file = folder + '/' + motioncor_file_name + '.sh'
@@ -554,6 +561,7 @@ def tomogram_motioncor2(motioncor2, frames, input_files, folder, tomo_name, tilt
         else:
             custom_doseweight_line = '%s --tilt_scheme %s --dose_per_tilt %f --min_angle %f --angle_step %f --starting_angle %f --pre_dose %f --dose_symmetric_group_size %d' % (
                 custom_doseweight_line, tilt_scheme, dose_per_movie, min_angle, angle_step, starting_tilt_angle, pre_dose, dose_symmetric_group_size)
+            custom_doseweight_line = '%s --dose_symmetric_groups_not_centered' % custom_doseweight_line if dose_symmetric_groups_not_centered else custom_doseweight_line
         f.write('echo "' + custom_doseweight_line + '"\n')
         f.write(custom_doseweight_line + '\n')
     f.close()
@@ -565,7 +573,7 @@ def add_ctf_estimate_line(file_to_append_to, input_folders, folder_list, binning
      tomo_name, tilt_scheme, min_angle, angle_step, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, starting_tilt_angle,
      only_make_sorted_ctf_mic_star, only_print_ctf_command, rln_version, ctf_software,
      CS, HT, AmpCnst, Box, ResMin, ResMax, dFMin, dFMax, FStep, dAst, ctfWin, cores, ctf_exe, ctf_star, only_do_unfinished,
-    write_tilt_angle_star, do_phaseshift, phase_min, phase_max, phase_step, dose_symmetric_group_size):
+    write_tilt_angle_star, do_phaseshift, phase_min, phase_max, phase_step, dose_symmetric_group_size,dose_symmetric_groups_not_centered):
     pixel_size = pixel_size*binning
     pixel_size_line = '--pixel_size %f' % (pixel_size)
     #input arguments
@@ -581,7 +589,7 @@ def add_ctf_estimate_line(file_to_append_to, input_folders, folder_list, binning
      'CS': (CS,default_CS), 'HT': (HT,default_HT), 'AmpCnst': (AmpCnst,default_AmpCnst), 'Box': (Box,default_Box), 'ResMin': (ResMin,default_ResMin), 'ResMax': (ResMax,default_ResMax), 'dFMin': (dFMin,default_dFMin), 'dFMax': (dFMax,default_dFMax),
     'FStep': (FStep,default_FStep), 'dAst': (dAst,default_dAst), 'ctfWin': (ctfWin,default_ctfWin), 'cores': (cores,default_cores), 'ctf_exe': (ctf_exe,default_ctf_exe), 'ctf_star': (ctf_star,default_ctf_star), 'gpu':(gpu, default_gpu),
     'phase_min': (phase_min, default_phase_min), 'phase_max': (phase_max, default_phase_max), 'phase_step': (phase_step, default_phase_step), 'dose_symmetric_group_size': (dose_symmetric_group_size, default_dose_symmetric_group_size)}
-    input_options = {'use_tilt_order_files': use_tilt_order_files, 'write_tilt_order_files': write_tilt_order_files, 'only_make_sorted_mic_star': only_make_sorted_ctf_mic_star, 'only_print_command': only_print_ctf_command, 'write_tilt_angle_star': write_tilt_angle_star, 'do_phaseshift': do_phaseshift}
+    input_options = {'use_tilt_order_files': use_tilt_order_files, 'write_tilt_order_files': write_tilt_order_files, 'only_make_sorted_mic_star': only_make_sorted_ctf_mic_star, 'only_print_command': only_print_ctf_command, 'write_tilt_angle_star': write_tilt_angle_star, 'do_phaseshift': do_phaseshift, 'dose_symmetric_groups_not_centered': dose_symmetric_groups_not_centered}
     if pass_only_do_unfinished_to_ctf_estimation:
         input_options['only_do_unfinished'] = only_do_unfinished
     lines_list = []
@@ -613,7 +621,7 @@ def main(motioncor2, frames, input_files, input_folders, tomo_name, tilt_scheme,
          only_make_sorted_ctf_mic_star, only_print_ctf_command, rln_version, ctf_software,
          CS, HT, AmpCnst, Box, ResMin, ResMax, dFMin, dFMax, FStep,
          dAst, ctfWin, cores, ctf_exe, ctf_star, do_ctf_estimation,
-         write_tilt_angle_star, do_phaseshift, phase_min, phase_max, phase_step, dose_symmetric_group_size):
+         write_tilt_angle_star, do_phaseshift, phase_min, phase_max, phase_step, dose_symmetric_group_size,dose_symmetric_groups_not_centered):
     if input_folders != None:
         folder_list = sorted(glob.glob(input_folders))
         folder_list = [dir for dir in folder_list if os.path.isdir(dir)]
@@ -631,7 +639,7 @@ def main(motioncor2, frames, input_files, input_folders, tomo_name, tilt_scheme,
         #Main script for individual tilt series
         motioncor_file = tomogram_motioncor2(motioncor2, frames, input_files, folder, temp_tomo_name, tilt_scheme, dose_per_movie, min_angle, angle_step,
          pixel_size, binning, throw, trunc, gpu, only_do_unfinished, do_motioncor2_doseweighting,
-         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations, starting_tilt_angle, crop, dose_symmetric_group_size)
+         do_custom_doseweighting, pre_dose, use_tilt_order_files, custom_tilt_order, write_tilt_order_files, patch, iterations, starting_tilt_angle, crop, dose_symmetric_group_size,dose_symmetric_groups_not_centered)
 
         if input_folders != None:
             batch_f.write(motioncor_file + '\n')
@@ -649,7 +657,7 @@ def main(motioncor2, frames, input_files, input_folders, tomo_name, tilt_scheme,
                           write_tilt_order_files, starting_tilt_angle,
                           only_make_sorted_ctf_mic_star, only_print_ctf_command, rln_version, ctf_software,
                           CS, HT, AmpCnst, Box, ResMin, ResMax, dFMin, dFMax, FStep, dAst, ctfWin, cores, ctf_exe,
-                          ctf_star, only_do_unfinished, write_tilt_angle_star, do_phaseshift, phase_min, phase_max, phase_step, dose_symmetric_group_size)
+                          ctf_star, only_do_unfinished, write_tilt_angle_star, do_phaseshift, phase_min, phase_max, phase_step, dose_symmetric_group_size,dose_symmetric_groups_not_centered)
 
     if only_make_batch_file != True:
         if input_folders == None:
@@ -676,7 +684,7 @@ if __name__ == "__main__":
          args.only_make_sorted_ctf_mic_star, args.only_print_ctf_command, args.rln_version, args.ctf_software,
          args.CS, args.HT, args.AmpCnst, args.Box, args.ResMin, args.ResMax, args.dFMin, args.dFMax, args.FStep,
          args.dAst, args.ctfWin, args.cores, args.ctf_exe, args.ctf_star, args.do_ctf_estimation,
-        args.write_tilt_angle_star, args.do_phaseshift, args.phase_min, args.phase_max, args.phase_step, args.dose_symmetric_group_size)
+        args.write_tilt_angle_star, args.do_phaseshift, args.phase_min, args.phase_max, args.phase_step, args.dose_symmetric_group_size, args.dose_symmetric_groups_not_centered)
 
 
 

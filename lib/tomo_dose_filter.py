@@ -9,6 +9,16 @@ import glob
 import argparse
 
 
+use_pyfftw = True
+if use_pyfftw:
+    try:
+        import pyfftw
+    except ImportError:
+        print('Fourier transform calculations will be faster if you install the pyfftw module! (using numpy.fft instead)')
+        use_pyfftw = False
+
+
+
 class ArgumentParser():
     def __init__(self):
         self.parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -27,6 +37,7 @@ class ArgumentParser():
         add('--starting_angle', type=float, default=default_starting_tilt_angle,
               help='(optional) The starting tilt angle. Only used for bidirectional and dose symmetric tilt schemes.')
         add('--dose_symmetric_group_size', type=int, default=default_dose_symmetric_group_size, help='The group size for grouped dose symmetric tilt schemes. (eg 3 gives; 13,12,11,7,6,5,1,2,3,4,8,9,10)')
+        add('--dose_symmetric_groups_not_centered', action='store_true', help='Set this if your grouped dose symmetric tilt scheme is not centered around the first image. otherwise ignored. (eg 12,11,10,6,5,4,1,2,3,7,8,9,13)')
         addr('-apix', '--pixel_size', required=True, type=float, help='The pixel size of the images in angstrom')
         add('--pre_dose', default=0, type=float, help='Initial dose before tilt series collected.')
         add('--file_append', default='dw', type=str, help='String to append to the end of the file.')
@@ -91,7 +102,8 @@ accepted_tilt_schemes = ['continuous_positive', 'continuous_negative', 'bidirect
 starting_angle_tilt_schemes = ['bidirectional_positive', 'bidirectional_negative', 'dose_symmetric_positive', 'dose_symmetric_negative']
 dose_symmetric_tilt_schemes = ['dose_symmetric_positive', 'dose_symmetric_negative']
 
-def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index, dose_symmetric_group_size=1):
+def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index, dose_symmetric_group_size=1, dose_symmetric_groups_not_centered=False):
+    dose_symmetric_groups_not_centered = False if dose_symmetric_group_size == 1 else dose_symmetric_groups_not_centered
     centre = zero_tilt_index + 1
     if tilt_scheme == 'continuous_positive':
         tilt_order = tilt_num
@@ -116,16 +128,17 @@ def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index, dose_symmetr
         subseries_offset = centre - distance_from_edge
         sub_tilt_num = tilt_num - subseries_offset
         sub_centre = centre - subseries_offset
-        number_of_groups = int(math.ceil((int(subseries_size / 2) / float(dose_symmetric_group_size))))
-        group_num = int(math.ceil(abs((sub_tilt_num - sub_centre) / float(dose_symmetric_group_size))))
+        group_offset = 1 if dose_symmetric_groups_not_centered else 0
+        number_of_groups = int(math.ceil(((int(subseries_size / 2)+group_offset) / float(dose_symmetric_group_size))))
+        group_num = int(math.ceil(abs((sub_tilt_num - sub_centre+group_offset/2.) / float(dose_symmetric_group_size))))
         if sub_tilt_num == sub_centre:
             tilt_order = 1
         elif sub_tilt_num > sub_centre:
-            tilt_order = sub_tilt_num - sub_centre + (group_num - 1) * dose_symmetric_group_size + 1
+            tilt_order = sub_tilt_num - sub_centre + (group_num-1)*dose_symmetric_group_size +1
         else:
-            tilt_order = (sub_centre - sub_tilt_num + 1) - ((group_num - 1) * dose_symmetric_group_size) + (group_num * 2 - 1) * (dose_symmetric_group_size)
+            tilt_order = (sub_centre - sub_tilt_num + 1) - ((group_num-1)*dose_symmetric_group_size) + ((group_num)*2-1)*(dose_symmetric_group_size)-group_offset
             if group_num == number_of_groups:
-                tilt_order = tilt_order - ((group_num * dose_symmetric_group_size) - (subseries_size / 2))
+                tilt_order = tilt_order - ((group_num * dose_symmetric_group_size) - (subseries_size / 2))+group_offset
         if tilt_num <= subseries_offset:
             tilt_order = total_tilts - tilt_num + 1
         if tilt_num >= centre + distance_from_edge:
@@ -139,16 +152,17 @@ def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index, dose_symmetr
         subseries_offset = centre - distance_from_edge
         sub_tilt_num = tilt_num - subseries_offset
         sub_centre = centre - subseries_offset
-        number_of_groups = int(math.ceil((int(subseries_size / 2) / float(dose_symmetric_group_size))))
-        group_num = int(math.ceil(abs((sub_tilt_num - sub_centre) / float(dose_symmetric_group_size))))
+        group_offset = 1 if dose_symmetric_groups_not_centered else 0
+        number_of_groups = int(math.ceil(((int(subseries_size / 2) + group_offset) / float(dose_symmetric_group_size))))
+        group_num = int(math.ceil(abs((sub_tilt_num - sub_centre-group_offset/2.) / float(dose_symmetric_group_size))))
         if sub_tilt_num == sub_centre:
             tilt_order = 1
         elif sub_tilt_num < sub_centre:
-            tilt_order = (sub_centre - sub_tilt_num + 1) + (group_num - 1) * dose_symmetric_group_size
+            tilt_order = (sub_centre - sub_tilt_num + 1) + (group_num-1)*dose_symmetric_group_size
         else:
-            tilt_order = sub_tilt_num - ((group_num - 1) * dose_symmetric_group_size) - sub_centre + (group_num * 2 - 1) * (dose_symmetric_group_size) + 1
+            tilt_order = sub_tilt_num - ((group_num-1)*dose_symmetric_group_size) - sub_centre + (group_num*2-1)*(dose_symmetric_group_size)+1-group_offset
             if group_num == number_of_groups:
-                tilt_order = tilt_order - ((group_num * dose_symmetric_group_size) - (subseries_size / 2))
+                tilt_order = tilt_order - ((group_num*dose_symmetric_group_size)-(subseries_size / 2))+group_offset
         if tilt_num <= subseries_offset:
             tilt_order = total_tilts - tilt_num + 1
         if tilt_num >= centre + distance_from_edge:
@@ -158,11 +172,12 @@ def tilt_order(tilt_scheme, tilt_num, total_tilts, zero_tilt_index, dose_symmetr
         raise ValueError
     return tilt_order
 
-def tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts, starting_tilt_angle,dose_symmetric_group_size):
+
+def tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts, starting_tilt_angle,dose_symmetric_group_size, dose_symmetric_groups_not_centered):
     max_angle = min_angle + (angle_step * (total_tilts - 1))
     tilt_list = [min_angle + (angle_step * i) for i in range(0, total_tilts)]
     zero_tilt_index = tilt_list.index(min(tilt_list, key=lambda x: abs(x - starting_tilt_angle)))
-    order_list = [tilt_order(tilt_scheme, i + 1, total_tilts, zero_tilt_index, dose_symmetric_group_size) for i in range(0, total_tilts)]
+    order_list = [tilt_order(tilt_scheme, i + 1, total_tilts, zero_tilt_index, dose_symmetric_group_size, dose_symmetric_groups_not_centered=dose_symmetric_groups_not_centered) for i in range(0, total_tilts)]
     starting_angle_string = ' starting from %d degrees' % starting_tilt_angle if tilt_scheme in starting_angle_tilt_schemes else ''
     ds_group_string = ' in groups of %d' % dose_symmetric_group_size if tilt_scheme in dose_symmetric_tilt_schemes and dose_symmetric_group_size != 1 else ''
     print('Tiltseries from %d to %d degrees in steps of %d degrees%s%s (%d tilts in total) using a %s tilt scheme.' % (
@@ -231,6 +246,7 @@ class DoseWeight:
                 ax = fig.gca(projection='3d')
                 surf = ax.plot_surface(X, Y, binned_filter_array)
             print('Overlaying filter...')
+            filter_array = self.fft_shift_filter(filter_array)
             filtered_image = self.overlay_filter(img, filter_array)
             print('Image filtered.')
             if not self.is_stack:
@@ -272,15 +288,13 @@ class DoseWeight:
         ycen = (ysize / 2)
         xrstep = 1 / (xsize * apix)  # reciprocal pixel size
         yrstep = 1 / (ysize * apix)
-        # iterate over numpy array
-        it = np.nditer(freq_array, flags=['multi_index'], op_flags=['readwrite'])
-        while not it.finished:
-            x = it.multi_index[1]
-            y = it.multi_index[0]
-            d = math.sqrt(((xrstep * (x - xcen)) ** 2) + ((yrstep * (y - ycen)) ** 2))
-            it[0] = d
-            it.iternext()
+        x, y = np.mgrid[0:ysize, 0:xsize]
+        freq_array = np.sqrt(((xrstep * (x - xcen)) ** 2) + ((yrstep * (y - ycen)) ** 2))
         return freq_array
+
+    def fft_shift_filter(self, filter_array):
+        filter_array = np.fft.ifftshift(filter_array)
+        return filter_array
 
     def create_filter_array(self, dose, freq_array, a, b, c):
         # q = exp((-dose)./(2.*((a.*(freq_array.^b))+c)));
@@ -288,18 +302,26 @@ class DoseWeight:
         return q
 
     def overlay_filter(self, img, filter_array):
-        fft = np.fft.fftshift(np.fft.fft2(img))
-        filtered_fft = np.multiply(fft, filter_array)
-        filtered_img = np.real(np.fft.ifft2(np.fft.ifftshift(filtered_fft))).astype('float32')
+        axes = (0, 1)
+        if use_pyfftw:
+            fft_func = pyfftw.interfaces.numpy_fft.fft2
+            ifft_func = pyfftw.interfaces.numpy_fft.ifft2
+            pyfftw.interfaces.cache.enable()
+        else:
+            fft_func = np.fft.fft2
+            ifft_func = np.fft.ifft2
+        filtered_img = np.real(ifft_func(np.multiply(fft_func(img, axes=axes), filter_array), axes=axes)).astype('float32')
+        if use_pyfftw:
+            pyfftw.interfaces.cache.disable()
         return filtered_img
 
 
 def tilt_series_dose_weight(tilt_series, dose_per_tilt, file_append, apix, plot_filters, tilt_scheme, min_angle,
-                            angle_step, do_not_do_dose_weighting, custom_dose_series, pre_dose, starting_tilt_angle,dose_symmetric_group_size):
+                            angle_step, do_not_do_dose_weighting, custom_dose_series, pre_dose, starting_tilt_angle,dose_symmetric_group_size,dose_symmetric_groups_not_centered):
     dw = DoseWeight(tilt_series, [], apix, file_append, plot_filters)
     if custom_dose_series == None:
         total_tilts = dw.number_of_files
-        order_list = tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts, starting_tilt_angle,dose_symmetric_group_size)
+        order_list = tilt_order_from_tilt_scheme(tilt_scheme, min_angle, angle_step, total_tilts, starting_tilt_angle,dose_symmetric_group_size,dose_symmetric_groups_not_centered)
         doses = [(order * dose_per_tilt) + pre_dose for order in order_list]
     else:
         doses = custom_dose_series.split(',')
@@ -317,11 +339,11 @@ def tilt_series_dose_weight(tilt_series, dose_per_tilt, file_append, apix, plot_
 
 
 def main(tilt_series, dose_per_tilt, file_append, apix, plot_filters, tilt_scheme, min_angle, angle_step,
-         do_not_do_dose_weighting, custom_dose_series, pre_dose, starting_tilt_angle,dose_symmetric_group_size):
+         do_not_do_dose_weighting, custom_dose_series, pre_dose, starting_tilt_angle,dose_symmetric_group_size,dose_symmetric_groups_not_centered):
     tilt_series = sorted(glob.glob(tilt_series))
     for stack in tilt_series:
         tilt_series_dose_weight(stack, dose_per_tilt, file_append, apix, plot_filters, tilt_scheme, min_angle,
-                                angle_step, do_not_do_dose_weighting, custom_dose_series, pre_dose, starting_tilt_angle,dose_symmetric_group_size)
+                                angle_step, do_not_do_dose_weighting, custom_dose_series, pre_dose, starting_tilt_angle,dose_symmetric_group_size,dose_symmetric_groups_not_centered)
 
 
 if __name__ == "__main__":
@@ -330,7 +352,36 @@ if __name__ == "__main__":
     argparser.validate(args)
 
     main(args.tilt_series, args.dose_per_tilt, args.file_append, args.pixel_size, plot_filters, args.tilt_scheme,
-         args.min_angle, args.angle_step, args.do_not_do_dose_weighting, args.custom_dose_series, args.pre_dose, args.starting_angle,args.dose_symmetric_group_size)
+         args.min_angle, args.angle_step, args.do_not_do_dose_weighting, args.custom_dose_series, args.pre_dose, args.starting_angle,args.dose_symmetric_group_size, args.dose_symmetric_groups_not_centered)
 
 
 
+'''
+    def create_frequency_array(self, shape, apix):
+        freq_array = np.zeros(shape)
+        xsize = shape[1]
+        ysize = shape[0]
+        xcen = (
+        xsize / 2)  # Brigg's center for array is half the image size +1 pix. I removed the 1 as didn't match with fft.
+        ycen = (ysize / 2)
+        xrstep = 1 / (xsize * apix)  # reciprocal pixel size
+        yrstep = 1 / (ysize * apix)
+        # iterate over numpy array
+        it = np.nditer(freq_array, flags=['multi_index'], op_flags=['readwrite'])
+        while not it.finished:
+            x = it.multi_index[1]
+            y = it.multi_index[0]
+            d = math.sqrt(((xrstep * (x - xcen)) ** 2) + ((yrstep * (y - ycen)) ** 2))
+            it[0] = d
+            it.iternext()
+        return freq_array
+
+'''
+
+'''
+    def overlay_filter(self, img, filter_array):
+        fft = np.fft.fftshift(np.fft.fft2(img))
+        filtered_fft = np.multiply(fft, filter_array)
+        filtered_img = np.real(np.fft.ifft2(np.fft.ifftshift(filtered_fft))).astype('float32')
+        return filtered_img
+'''
