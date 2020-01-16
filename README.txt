@@ -154,3 +154,14 @@ Ctf estimation:
         --version The version of imod defocus file you want to write. (version 3 files include astigmatism but only work with later versions of imod (4.9+))
 
     (It's very important that the micrographs in the star file remain in tilt order and separated by tilt series)
+
+
+tomo_doseweight_sharpen:
+
+When applying dose weighting to the original images (with tomo_dose_filter), the low frequency information gets amplified
+relative to the high frequency information. This results in maps that are unsharp (blurry). One method to (approximately)
+correct for this is to b-factor sharpen the final maps but this is an imperfect correction and the appropriate b-factor
+is difficult to estimate for maps at resolutions worse than 10A. Instead the tomo_doseweight_sharpen script can be used
+to perfectly correct for the dose weighting induced blurring. In the single particle case, this correction is applied during
+motion correction of image frames so it is equally appropriate to apply this correction to the tomogram/subvolumes prior
+to refinement.

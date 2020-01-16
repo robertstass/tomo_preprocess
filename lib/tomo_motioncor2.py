@@ -60,7 +60,6 @@ class ArgumentParser():
         add_m('--patch', default=default_patch, type=int, help="motioncor2 Patch option. x will be given as 'x x'")
         add_m('--iterations', default=default_iterations, type=int, help='motioncor2 Iter option.')
         add_m('--crop', default='0,0', help='motioncor2 crop option. Enter x and y separated by a comma e.g. 3000,3000')
-
         add_d('-dose', '--dose_per_movie', type=float, default=None,
               help='Dose applied per movie. (this is divided by the number of frames to input into motioncor2')
         add_d('--pre_dose', default=0, type=float, help='Pre exposure before tomogram taken.')
